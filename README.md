@@ -110,7 +110,7 @@ The script picks the right build for your system, checks its SHA-256 checksum, a
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mostafaelgazar48/ccswitch/main/install.sh \
-  | CCSWITCH_VERSION=v0.1.1 CCSWITCH_INSTALL_DIR=/usr/local/bin sh
+  | CCSWITCH_VERSION=v0.2.0 CCSWITCH_INSTALL_DIR=/usr/local/bin sh
 ```
 
 Or unpack an archive yourself:
