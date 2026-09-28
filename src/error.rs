@@ -8,7 +8,7 @@ pub enum Error {
     AlreadyExists(String),
     NoDefault,
     DefaultMissing(String),
-    ClaudeNotFound(String),
+    ProgramNotFound { program: String, hint: &'static str },
     NeedsConfirmation(String),
     Aborted,
     Settings { path: String, message: String },
@@ -41,10 +41,9 @@ impl fmt::Display for Error {
                 f,
                 "default profile '{n}' no longer exists; pick another with `ccswitch use <name>`"
             ),
-            Error::ClaudeNotFound(p) => write!(
-                f,
-                "could not run '{p}': not found (install Claude Code or set CCSWITCH_CLAUDE)"
-            ),
+            Error::ProgramNotFound { program, hint } => {
+                write!(f, "could not run '{program}': not found ({hint})")
+            }
             Error::NeedsConfirmation(n) => write!(f, "refusing to delete '{n}' without confirmation; pass --yes"),
             Error::Aborted => write!(f, "aborted"),
             Error::Settings { path, message } => write!(f, "cannot update {path}: {message}"),

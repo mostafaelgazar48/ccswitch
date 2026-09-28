@@ -11,18 +11,43 @@ use crate::error::{Error, Result};
 /// Runs Claude Code against `config_dir` and returns its exit code.
 /// On Unix this replaces the current process and only returns on failure.
 pub fn claude(config_dir: &Path, args: &[String]) -> Result<i32> {
-    let program = env::var_os("CCSWITCH_CLAUDE")
-        .filter(|p| !p.is_empty())
-        .unwrap_or_else(|| OsString::from("claude"));
+    let program = program_from_env("CCSWITCH_CLAUDE", "claude");
     let mut cmd = Command::new(resolve_program(&program));
     cmd.env("CLAUDE_CONFIG_DIR", config_dir).args(args);
-    run(cmd).map_err(|e| spawn_error(e, &program))
+    run(cmd).map_err(|e| spawn_error(e, &program, "install Claude Code or set CCSWITCH_CLAUDE"))
 }
 
-fn spawn_error(e: io::Error, program: &OsStr) -> Error {
+/// Opens VS Code with its own `user_data_dir`, so it starts a separate instance whose
+/// Claude Code extension inherits `CLAUDE_CONFIG_DIR` instead of reusing a running window.
+pub fn code(config_dir: &Path, user_data_dir: &Path, args: &[String]) -> Result<i32> {
+    let program = program_from_env("CCSWITCH_CODE", "code");
+    let mut cmd = Command::new(resolve_program(&program));
+    cmd.env("CLAUDE_CONFIG_DIR", config_dir)
+        .arg("--user-data-dir")
+        .arg(user_data_dir)
+        .args(args);
+    run(cmd).map_err(|e| {
+        spawn_error(
+            e,
+            &program,
+            "install VS Code's `code` command or set CCSWITCH_CODE",
+        )
+    })
+}
+
+fn program_from_env(var: &str, default: &str) -> OsString {
+    env::var_os(var)
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| OsString::from(default))
+}
+
+fn spawn_error(e: io::Error, program: &OsStr, hint: &'static str) -> Error {
     let name = program.to_string_lossy().into_owned();
     if e.kind() == io::ErrorKind::NotFound {
-        Error::ClaudeNotFound(name)
+        Error::ProgramNotFound {
+            program: name,
+            hint,
+        }
     } else {
         Error::io(format!("running {name}"), e)
     }

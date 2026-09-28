@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand, ValueEnum};
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch bypass personal on\n\n\
-                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)"
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n\n\
+                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -39,6 +39,13 @@ pub enum Command {
         #[arg(long)]
         bypass: bool,
         /// Arguments passed to Claude unchanged
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// Open VS Code with a profile, so the Claude Code extension uses it
+    Code {
+        name: Option<String>,
+        /// Arguments passed to VS Code unchanged (default: the current folder)
         #[arg(last = true)]
         args: Vec<String>,
     },

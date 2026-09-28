@@ -1,6 +1,6 @@
 [package]
 name = "ccswitch"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Switch between isolated Claude Code profiles from one command"
 authors = ["Mostafa Elgazar"]
