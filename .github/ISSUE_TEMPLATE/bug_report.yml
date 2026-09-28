@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in ccswitch doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what you got instead.
+      placeholder: |
+        I ran `ccswitch run work` and expected ... but got ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Command output
+      description: Paste the full output, including any `ccswitch:` error line.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: ccswitch version
+      description: Output of `ccswitch --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Linux, macOS (Apple Silicon), macOS (Intel), Windows, Other]
+    validations:
+      required: true
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
