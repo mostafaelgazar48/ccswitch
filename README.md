@@ -154,6 +154,7 @@ not touched.
 | `ccswitch current` | Print the default profile's name. |
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
+| `ccswitch code [name] [-- args…]` | Open VS Code so the Claude Code extension uses a profile. Opens the current folder unless you pass arguments after `--`. |
 | `ccswitch bypass <name> [on\|off]` | Show or change bypass mode saved on a profile. |
 | `ccswitch rename <old> <new>` (`mv`) | Rename a profile. Claude may ask you to log in again. |
 | `ccswitch remove <name>` (`rm`) | Delete a profile and its login. Asks first; `--yes` skips the question. |
@@ -178,6 +179,35 @@ cd "$(ccswitch path work)"      # open a profile's folder
 echo "Using $(ccswitch current)"
 alias cw='ccswitch run work --'  # shell shortcut: cw --resume
 ```
+
+## VS Code
+
+The Claude Code extension for VS Code reads `CLAUDE_CONFIG_DIR` from the environment VS Code was
+started with. `ccswitch code` sets it for you:
+
+```sh
+ccswitch code                         # default profile, current folder
+ccswitch code work                    # "work" profile, current folder
+ccswitch code work -- ~/projects/app  # arguments after -- go to `code`
+```
+
+VS Code normally hands a new folder to the instance that's already running, which still has the old
+environment. So each profile gets its own VS Code instance, started with `--user-data-dir` pointing to
+`vscode-data/` inside the profile. You can have a work window and a personal window open side by side.
+
+That instance shares your installed extensions, but starts with its own settings, keybindings and
+recent folders. Turn on Settings Sync in it if you want your usual setup.
+
+Only one profile at a time? You can skip `ccswitch code` and set it once in your VS Code user settings:
+
+```json
+"claudeCode.environmentVariables": [
+  { "name": "CLAUDE_CONFIG_DIR", "value": "/home/you/.ccswitch/profiles/work" }
+]
+```
+
+`ccswitch path work` prints the folder to use. This setting only works in user settings, not in a
+project's `.vscode/settings.json`.
 
 ## Bypass permissions
 
@@ -210,7 +240,8 @@ variable set:
 ├── default              # name of the default profile
 └── profiles/
     ├── personal/        # CLAUDE_CONFIG_DIR for "personal"
-    │   └── settings.json
+    │   ├── settings.json
+    │   └── vscode-data/ # VS Code instance for `ccswitch code personal`
     └── work/
 ```
 
@@ -223,12 +254,14 @@ all behave exactly as if you had run `claude` directly.
 |-------------------|---------------|---------------------------------------------|
 | `CCSWITCH_HOME`   | `~/.ccswitch` | Where profiles are stored                   |
 | `CCSWITCH_CLAUDE` | `claude`      | The Claude Code program to run (name or path) |
+| `CCSWITCH_CODE`   | `code`        | The VS Code program to run (name or path)   |
 
 ## Troubleshooting
 
 | Message | Fix |
 |---|---|
 | `could not run 'claude': not found` | Install Claude Code, or point `CCSWITCH_CLAUDE` to it. |
+| `could not run 'code': not found` | In VS Code, run **Shell Command: Install 'code' command in PATH**, or point `CCSWITCH_CODE` to it (for example `codium` or `cursor`). |
 | `no default profile` | Run `ccswitch use <name>`, or pass a name: `ccswitch run work`. |
 | `default profile 'x' no longer exists` | The folder was deleted. Pick another with `ccswitch use <name>`. |
 | `refusing to delete 'x' without confirmation` | You're not in an interactive terminal. Add `--yes`. |

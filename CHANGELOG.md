@@ -6,6 +6,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `ccswitch code [name] [-- args…]` opens VS Code so the Claude Code extension uses that profile. Each profile gets its own VS Code instance (`--user-data-dir`), so windows for different profiles can be open at once.
+- `CCSWITCH_CODE` environment variable to run a different editor binary, such as `codium` or `cursor`.
+
 ## [0.1.1] - 2026-09-28
 
 ### Added

@@ -7,6 +7,9 @@ use crate::{
     store::Store,
 };
 
+/// VS Code's user data for `ccswitch code`, kept inside the profile so rename and remove cover it.
+const VSCODE_DATA_DIR: &str = "vscode-data";
+
 /// Executes a command and returns the process exit code.
 pub fn run(command: Command) -> Result<i32> {
     let store = Store::from_env()?;
@@ -37,6 +40,13 @@ pub fn run(command: Command) -> Result<i32> {
                 args.insert(0, "--dangerously-skip-permissions".to_owned());
             }
             launch::claude(&path, &args)
+        }
+        Command::Code { name, mut args } => {
+            let (_, path) = store.resolve(name.as_deref())?;
+            if args.is_empty() {
+                args.push(".".to_owned());
+            }
+            launch::code(&path, &path.join(VSCODE_DATA_DIR), &args)
         }
         Command::Bypass { name, state } => bypass(&store, &name, state),
         Command::Rename { old, new } => {

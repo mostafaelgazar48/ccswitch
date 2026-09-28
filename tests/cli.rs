@@ -132,6 +132,56 @@ fn missing_claude_binary_is_explained() {
 }
 
 #[test]
+fn code_opens_vscode_with_its_own_data_dir() {
+    let s = Sandbox::new("code");
+    s.run(&["add", "work", "--no-login"]);
+    let code = |args: &[&str]| {
+        s.cmd(args)
+            .env("CCSWITCH_CODE", s.dir.join("fake-claude"))
+            .output()
+            .unwrap()
+    };
+    let data_dir = format!("{}/vscode-data", s.profile("work"));
+
+    assert_eq!(code(&["code"]).status.code(), Some(7));
+    assert_eq!(
+        s.called(),
+        [
+            s.profile("work"),
+            "--user-data-dir".into(),
+            data_dir.clone(),
+            ".".into()
+        ]
+    );
+
+    code(&["code", "work", "--", "/some/project", "--new-window"]);
+    assert_eq!(
+        s.called(),
+        [
+            s.profile("work"),
+            "--user-data-dir".into(),
+            data_dir,
+            "/some/project".into(),
+            "--new-window".into()
+        ]
+    );
+}
+
+#[test]
+fn missing_code_binary_is_explained() {
+    let s = Sandbox::new("nocode");
+    s.run(&["add", "a", "--no-login"]);
+    let out = s
+        .cmd(&["code"])
+        .env("CCSWITCH_CODE", "definitely-not-code-xyz")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("could not run 'definitely-not-code-xyz': not found"));
+    assert!(stderr(&out).contains("CCSWITCH_CODE"));
+}
+
+#[test]
 fn remove_needs_confirmation_and_clears_default() {
     let s = Sandbox::new("remove");
     s.run(&["add", "a", "--no-login"]);
