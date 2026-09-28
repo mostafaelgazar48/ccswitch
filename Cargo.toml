@@ -14,7 +14,7 @@ exclude = ["/dist", "/.github"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-dirs = "6"
+dirs = "7"
 serde_json = { version = "1", features = ["preserve_order"] }
 
 [profile.release]
