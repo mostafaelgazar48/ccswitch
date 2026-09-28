@@ -15,7 +15,8 @@ Releases are automated. You push a version tag, and GitHub Actions tests, builds
  3. commit + push to main  ───▶  CI: fmt, clippy, tests (Linux, macOS, Windows)
  4. git tag v0.2.0 + push  ───▶  check tag == Cargo.toml version
                                  run CI again
-                                 build 5 binaries (Linux x2, macOS x2, Windows)
+                                 build Linux, macOS, Windows binaries
+                                 package .deb, .dmg, Windows installer
                                  create GitHub Release with binaries, checksums
                                  and notes from CHANGELOG.md
 ```
@@ -157,12 +158,17 @@ It takes about 5–10 minutes. When it finishes, the release appears at
 <https://github.com/mostafaelgazar48/ccswitch/releases> with these files:
 
 ```text
-ccswitch-x86_64-unknown-linux-musl.tar.gz    (+ .sha256)
-ccswitch-aarch64-unknown-linux-musl.tar.gz   (+ .sha256)
-ccswitch-x86_64-apple-darwin.tar.gz          (+ .sha256)
-ccswitch-aarch64-apple-darwin.tar.gz         (+ .sha256)
-ccswitch-x86_64-pc-windows-msvc.zip          (+ .sha256)
-SHA256SUMS
+Windows   ccswitch-<version>-windows-x86_64-setup.exe   installer, tested in CI (install, PATH, uninstall)
+          ccswitch-x86_64-pc-windows-msvc.exe           standalone binary
+          ccswitch-x86_64-pc-windows-msvc.zip
+macOS     ccswitch-<version>-macos-universal.dmg        Apple Silicon + Intel, tested in CI (mount, run)
+          ccswitch-aarch64-apple-darwin.tar.gz
+          ccswitch-x86_64-apple-darwin.tar.gz
+Linux     ccswitch_<version>-1_amd64.deb
+          ccswitch_<version>-1_arm64.deb
+          ccswitch-x86_64-unknown-linux-musl.tar.gz
+          ccswitch-aarch64-unknown-linux-musl.tar.gz
+          (+ a .sha256 for every file, and SHA256SUMS)
 ```
 
 ### 2.6 Check the published release
@@ -173,6 +179,14 @@ ccswitch --version                           # should print the new version
 ```
 
 ---
+
+## Test the packages without releasing
+
+**Actions → Release → Run workflow** (or `gh workflow run release.yml`) runs every build and package
+test but doesn't publish anything. Download the results from the run's **Artifacts** section.
+
+The packaging files live in `packaging/`: `macos/build-dmg.sh`, `macos/Install ccswitch.command`, and
+`windows/ccswitch.iss` (Inno Setup). The `.deb` settings are under `[package.metadata.deb]` in `Cargo.toml`.
 
 ## Pre-releases
 

@@ -47,48 +47,78 @@ $ ccswitch run work
 
 You need [Claude Code](https://code.claude.com/docs/en/setup) installed, so that `claude` runs in your terminal.
 
-### Linux and macOS (recommended)
+Pick the option for your system. All files are on the
+[latest release](https://github.com/mostafaelgazar48/ccswitch/releases/latest) page.
+
+| System | Recommended | Other options |
+|---|---|---|
+| **Windows** | `ccswitch-<version>-windows-x86_64-setup.exe` | `ccswitch-x86_64-pc-windows-msvc.exe`, `.zip` |
+| **macOS** (Apple Silicon and Intel) | install script, or `ccswitch-<version>-macos-universal.dmg` | `ccswitch-aarch64-apple-darwin.tar.gz`, `ccswitch-x86_64-apple-darwin.tar.gz` |
+| **Debian / Ubuntu** | `ccswitch_<version>-1_amd64.deb` or `_arm64.deb` | install script |
+| **Other Linux** | install script | `ccswitch-x86_64-unknown-linux-musl.tar.gz`, `ccswitch-aarch64-unknown-linux-musl.tar.gz` |
+
+Every file has a matching `.sha256`, and `SHA256SUMS` lists them all.
+
+### Windows
+
+**Installer (recommended):** download `ccswitch-<version>-windows-x86_64-setup.exe` and run it.
+It installs for your user only, so no admin rights are needed, and adds ccswitch to your `PATH`.
+Open a **new** terminal afterwards and run `ccswitch --version`. To uninstall, go to
+*Settings → Apps → Installed apps → ccswitch*.
+
+> Windows SmartScreen may say "Windows protected your PC" because the installer isn't code-signed.
+> Click **More info → Run anyway**.
+
+**Portable:** download `ccswitch-x86_64-pc-windows-msvc.exe`, rename it to `ccswitch.exe`, and put it
+in a folder on your `PATH`.
+
+### macOS
+
+**Install script (recommended, no security prompts):**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mostafaelgazar48/ccswitch/main/install.sh | sh
 ```
 
-The script picks the right build for your system, verifies its SHA-256 checksum, and installs it to
+**Disk image:** download `ccswitch-<version>-macos-universal.dmg`, open it, and double-click
+**Install ccswitch.command**. It copies `ccswitch` to `/usr/local/bin` and asks for your password.
+The same `.dmg` works on Apple Silicon and Intel Macs.
+
+> The app isn't signed with an Apple Developer ID, so macOS blocks it the first time. Click
+> **Done**, then open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
+> next to the ccswitch message. On older macOS you can instead right-click the file and choose **Open**.
+
+### Debian and Ubuntu
+
+Download the `.deb` for your machine (`amd64` for most PCs, `arm64` for ARM) and install it:
+
+```sh
+sudo apt install ./ccswitch_*_amd64.deb
+ccswitch --version
+```
+
+This puts `ccswitch` in `/usr/bin`. Remove it with `sudo apt remove ccswitch`.
+
+### Any Linux (install script)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mostafaelgazar48/ccswitch/main/install.sh | sh
+```
+
+The script picks the right build for your system, checks its SHA-256 checksum, and installs it to
 `~/.local/bin`. To choose a version or a folder:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mostafaelgazar48/ccswitch/main/install.sh \
-  | CCSWITCH_VERSION=v0.1.0 CCSWITCH_INSTALL_DIR=/usr/local/bin sh
+  | CCSWITCH_VERSION=v0.1.1 CCSWITCH_INSTALL_DIR=/usr/local/bin sh
 ```
 
-### Manual download
-
-Download the file for your system from the [latest release](https://github.com/mostafaelgazar48/ccswitch/releases/latest):
-
-| System                        | File                                     |
-|-------------------------------|------------------------------------------|
-| Linux x86_64                  | `ccswitch-x86_64-unknown-linux-musl.tar.gz`  |
-| Linux ARM64                   | `ccswitch-aarch64-unknown-linux-musl.tar.gz` |
-| macOS Apple Silicon (M1 and later) | `ccswitch-aarch64-apple-darwin.tar.gz`   |
-| macOS Intel                   | `ccswitch-x86_64-apple-darwin.tar.gz`    |
-| Windows x86_64                | `ccswitch-x86_64-pc-windows-msvc.zip`    |
-
-Every file has a matching `.sha256`, and `SHA256SUMS` lists them all.
-
-**Linux / macOS:**
+Or unpack an archive yourself:
 
 ```sh
 tar xzf ccswitch-*.tar.gz ccswitch
 mkdir -p ~/.local/bin && mv ccswitch ~/.local/bin/
-ccswitch --version
 ```
-
-> **macOS:** if the file was downloaded with a browser, macOS may say it "cannot be opened". The binary
-> isn't signed with an Apple Developer ID. Clear the download flag once with
-> `xattr -d com.apple.quarantine ~/.local/bin/ccswitch`. The install script doesn't need this step.
-
-**Windows:** extract `ccswitch.exe` from the zip into a folder on your `PATH`, then run
-`ccswitch --version` in PowerShell.
 
 ### From source
 
@@ -207,10 +237,15 @@ all behave exactly as if you had run `claude` directly.
 
 ## Uninstall
 
-```sh
-rm ~/.local/bin/ccswitch   # the program
-rm -rf ~/.ccswitch         # all profiles and their logins (optional)
-```
+| Installed with | Remove with |
+|---|---|
+| Install script or archive | `rm ~/.local/bin/ccswitch` |
+| `.dmg` | `sudo rm /usr/local/bin/ccswitch` |
+| `.deb` | `sudo apt remove ccswitch` |
+| Windows installer | *Settings → Apps → Installed apps → ccswitch → Uninstall* |
+
+Your profiles stay in `~/.ccswitch` (Windows: `%USERPROFILE%\.ccswitch`). Delete that folder too if
+you want to remove all profiles and their logins.
 
 ## Contributing
 

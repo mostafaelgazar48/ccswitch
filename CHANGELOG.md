@@ -6,6 +6,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-28
+
+### Added
+- Windows installer (`…-windows-x86_64-setup.exe`). It installs per user without admin rights and adds ccswitch to `PATH`.
+- Standalone Windows `ccswitch.exe` download.
+- macOS disk image (`…-macos-universal.dmg`) with one binary for Apple Silicon and Intel, plus a double-click installer.
+- Debian/Ubuntu packages (`.deb`) for amd64 and arm64.
+
 ## [0.1.0] - 2026-09-28
 
 ### Added
@@ -18,5 +26,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
 ### Security
 - Profile directories are created with `0700` permissions on Unix, because they hold login credentials.
 
-[Unreleased]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mostafaelgazar48/ccswitch/releases/tag/v0.1.0
