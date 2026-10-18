@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n\n\
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n  ccswitch usage --since 30d --by model\n\n\
                   Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_PROFILE Profile to use in this shell, before .ccswitch files and the default\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
@@ -87,6 +87,20 @@ pub enum Command {
     },
     /// Continue a conversation on another profile, such as when one account hits its usage limit
     Handoff(HandoffArgs),
+    /// Show tokens used and their estimated API cost, across every profile or one
+    Usage {
+        /// Only this profile [default: every profile]
+        name: Option<String>,
+        /// First day to include: 7d (the last 7 days), 30d, YYYY-MM-DD or all. Days are UTC
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Group rows by
+        #[arg(long, value_enum, default_value_t = GroupBy::Day)]
+        by: GroupBy,
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
     /// Rename a profile (Claude may ask you to log in again)
     #[command(visible_alias = "mv")]
     Rename { old: String, new: String },
@@ -173,6 +187,14 @@ pub enum Shell {
     Fish,
     #[value(alias = "pwsh")]
     Powershell,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum GroupBy {
+    Day,
+    Model,
+    Profile,
+    Session,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

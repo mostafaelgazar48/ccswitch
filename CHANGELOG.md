@@ -20,6 +20,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - `CCSWITCH_PROFILE` picks the profile for a shell. Without a name, commands use it first, then the nearest `.ccswitch` file, then the default.
 - `ccswitch handoff <to>` copies the latest conversation in this folder (or `--session <id>`) to another profile, with its subagent output and rewind history, and resumes it there. `--from`, `--move`, `--force`, `--no-resume`, and Claude flags after `--`.
 - `ccswitch sessions [name]` lists saved conversations with their titles; `--all` covers every folder.
+- `ccswitch usage [name]` adds up tokens (input, output, cache write, cache read) and their estimated API cost from every profile's conversation logs. `--since 7d|30d|YYYY-MM-DD|all`, `--by day|model|profile|session`, `--json`. Repeated log lines and conversations copied by `handoff` are counted once.
 
 ### Changed
 - `ccswitch current` prints the profile in use in this folder or shell, and says on stderr where the choice came from.

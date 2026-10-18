@@ -756,3 +756,70 @@ fn handoff_without_sessions_is_explained() {
         stderr(&out)
     );
 }
+
+fn usage_line(id: &str, day: &str, model: &str, input: u64, output: u64) -> String {
+    format!(
+        r#"{{"type":"assistant","timestamp":"{day}T10:00:00.000Z","sessionId":"s-{id}","requestId":"req-{id}","message":{{"id":"msg-{id}","model":"{model}","usage":{{"input_tokens":{input},"output_tokens":{output},"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}}}"#
+    ) + "\n"
+}
+
+#[test]
+fn usage_sums_across_profiles_once_per_request() {
+    let sb = Sandbox::new("usage");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["add", "home", "--no-login"]);
+    let work = PathBuf::from(sb.profile("work")).join("projects/-p");
+    fs::create_dir_all(work.join("s1/subagents")).unwrap();
+    let a = usage_line("a", "2026-10-01", "claude-sonnet-5-5", 1_000_000, 0);
+    // Logged twice (streaming) and copied to the other profile (handoff): counted once.
+    fs::write(
+        work.join("s1.jsonl"),
+        format!("{a}{a}{{\"type\":\"user\"}}\n"),
+    )
+    .unwrap();
+    fs::write(
+        work.join("s1/subagents/x.jsonl"),
+        usage_line("b", "2026-10-02", "claude-sonnet-5-5", 0, 1_000_000),
+    )
+    .unwrap();
+    let home = PathBuf::from(sb.profile("home")).join("projects/-p");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("s2.jsonl"),
+        format!(
+            "{a}{}",
+            usage_line("c", "2026-10-02", "mystery-model", 5, 5)
+        ),
+    )
+    .unwrap();
+
+    let out = sb.run(&["usage", "--since", "2026-10-01", "--json"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["since"], "2026-10-01");
+    assert_eq!(json["rows"][0]["key"], "2026-10-01");
+    assert_eq!(json["rows"][1]["key"], "2026-10-02");
+    assert_eq!(json["total"]["requests"], 3);
+    assert_eq!(json["total"]["input"], 1_000_005);
+    assert_eq!(json["total"]["estimatedCostUsd"], 12.0); // $2 input + $10 output
+    assert_eq!(json["total"]["unpricedRequests"], 1);
+
+    let table = sb.run(&["usage", "--since", "2026-10-02", "--by", "model"]);
+    let text = stdout(&table);
+    assert!(text.starts_with("MODEL"), "{text}");
+    assert!(
+        text.contains("claude-sonnet-5-5") && text.contains("$10.00"),
+        "{text}"
+    );
+    assert!(stderr(&table).contains("1 request(s) from models without a known price"));
+
+    let one = sb.run(&[
+        "usage", "home", "--since", "all", "--by", "profile", "--json",
+    ]);
+    let json: serde_json::Value = serde_json::from_slice(&one.stdout).unwrap();
+    assert_eq!(json["rows"][0]["key"], "home");
+    assert_eq!(json["total"]["requests"], 2);
+
+    assert!(stderr(&sb.run(&["usage", "--since", "soon"])).contains("invalid --since 'soon'"));
+    assert!(stderr(&sb.run(&["usage", "--since", "2027-01-01"])).contains("No usage since"));
+}

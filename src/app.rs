@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
     path::Path,
@@ -9,11 +10,12 @@ use serde_json::json;
 
 use crate::{
     claude_json,
-    cli::{Command, HandoffArgs, ShareArgs, Toggle},
+    cli::{Command, GroupBy, HandoffArgs, ShareArgs, Toggle},
     date,
     error::{Context, Error, Result},
     launch, sessions, share, shell,
     store::{Source, Store},
+    usage::{self, Totals},
 };
 
 /// VS Code's user data for `ccswitch code`, kept inside the profile so rename and remove cover it.
@@ -83,6 +85,12 @@ pub fn run(command: Command) -> Result<i32> {
             list_sessions(&store, name.as_deref(), all, limit)
         }
         Command::Handoff(args) => handoff(&store, args),
+        Command::Usage {
+            name,
+            since,
+            by,
+            json,
+        } => show_usage(&store, name, &since, by, json),
         Command::Bypass { name, state } => bypass(&store, &name, state),
         Command::Rename { old, new } => {
             store.rename(&old, &new)?;
@@ -218,12 +226,13 @@ fn status(store: &Store, as_json: bool) -> Result<i32> {
         "LAST USED",
     ]
     .map(String::from);
-    print_table(&header, &rows);
+    print_table(&header, &rows, header.len());
     Ok(0)
 }
 
-/// Left-aligned columns separated by two spaces, without trailing spaces.
-fn print_table<R: AsRef<[String]>>(header: &[String], rows: &[R]) {
+/// Columns separated by two spaces, without trailing spaces. Columns from `right_from` on are
+/// right-aligned.
+fn print_table<R: AsRef<[String]>>(header: &[String], rows: &[R], right_from: usize) {
     let mut widths = vec![0; header.len()];
     for row in std::iter::once(header).chain(rows.iter().map(AsRef::as_ref)) {
         for (w, cell) in widths.iter_mut().zip(row) {
@@ -234,7 +243,14 @@ fn print_table<R: AsRef<[String]>>(header: &[String], rows: &[R]) {
         let line: Vec<String> = row
             .iter()
             .zip(&widths)
-            .map(|(cell, w)| format!("{cell:w$}"))
+            .enumerate()
+            .map(|(i, (cell, w))| {
+                if i >= right_from {
+                    format!("{cell:>w$}")
+                } else {
+                    format!("{cell:w$}")
+                }
+            })
             .collect();
         println!("{}", line.join("  ").trim_end());
     }
@@ -277,10 +293,8 @@ fn list_sessions(store: &Store, name: Option<&str>, all: bool, limit: usize) -> 
             row
         })
         .collect();
-    print_table(
-        &header.into_iter().map(String::from).collect::<Vec<_>>(),
-        &rows,
-    );
+    let header: Vec<String> = header.into_iter().map(String::from).collect();
+    print_table(&header, &rows, header.len());
     if found.len() > limit {
         eprintln!("({} more; use -n to show more)", found.len() - limit);
     }
@@ -345,6 +359,126 @@ fn handoff(store: &Store, args: HandoffArgs) -> Result<i32> {
     let mut claude_args = vec!["--resume".to_owned(), session.id];
     claude_args.extend(args.args);
     launch::claude(&to, &claude_args)
+}
+
+fn show_usage(
+    store: &Store,
+    name: Option<String>,
+    since: &str,
+    by: GroupBy,
+    as_json: bool,
+) -> Result<i32> {
+    let (since_day, since_time) =
+        date::since(since, SystemTime::now()).ok_or_else(|| Error::BadSince(since.to_owned()))?;
+    let names = match name {
+        Some(name) => vec![name],
+        None => store.list()?,
+    };
+    let mut requests = Vec::new();
+    let mut seen = HashSet::new();
+    for name in &names {
+        let profile = store.existing(name)?;
+        for request in usage::requests(&profile, &since_day, since_time, &mut seen)? {
+            requests.push((name, request));
+        }
+    }
+    let groups = usage::group(requests.iter().map(|(profile, r)| {
+        let key = match by {
+            GroupBy::Day => r.day.clone(),
+            GroupBy::Model => r.model.clone(),
+            GroupBy::Profile => (*profile).clone(),
+            GroupBy::Session => format!("{profile}/{}", r.session),
+        };
+        (key, &r.totals)
+    }));
+    let mut rows: Vec<(String, Totals)> = groups.into_iter().collect();
+    if by != GroupBy::Day {
+        rows.sort_by(|a, b| {
+            b.1.cost
+                .total_cmp(&a.1.cost)
+                .then(b.1.tokens().cmp(&a.1.tokens()))
+        });
+    }
+    let mut total = Totals::default();
+    for (_, t) in &rows {
+        total.add(t);
+    }
+
+    if as_json {
+        let object = |t: &Totals| {
+            json!({
+                "requests": t.requests,
+                "input": t.input,
+                "output": t.output,
+                "cacheWrite": t.cache_write,
+                "cacheRead": t.cache_read,
+                "totalTokens": t.tokens(),
+                "estimatedCostUsd": (t.cost * 100.0).round() / 100.0,
+                "unpricedRequests": t.unpriced,
+            })
+        };
+        let rows: Vec<_> = rows
+            .iter()
+            .map(|(key, t)| {
+                let mut o = object(t);
+                o["key"] = key.clone().into();
+                o
+            })
+            .collect();
+        let out = json!({ "since": since_day, "rows": rows, "total": object(&total) });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).expect("JSON always serializes")
+        );
+        return Ok(0);
+    }
+    if rows.is_empty() {
+        eprintln!("No usage since {since_day}.");
+        return Ok(0);
+    }
+    let by_name = match by {
+        GroupBy::Day => "DAY",
+        GroupBy::Model => "MODEL",
+        GroupBy::Profile => "PROFILE",
+        GroupBy::Session => "SESSION",
+    };
+    let cells = |key: &str, t: &Totals| {
+        vec![
+            key.to_owned(),
+            usage::thousands(t.requests),
+            usage::thousands(t.input),
+            usage::thousands(t.output),
+            usage::thousands(t.cache_write),
+            usage::thousands(t.cache_read),
+            usage::thousands(t.tokens()),
+            format!("${:.2}", t.cost),
+        ]
+    };
+    let header: Vec<String> = [
+        by_name,
+        "REQUESTS",
+        "INPUT",
+        "OUTPUT",
+        "CACHE WRITE",
+        "CACHE READ",
+        "TOTAL",
+        "EST. COST",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut table: Vec<Vec<String>> = rows.iter().map(|(k, t)| cells(k, t)).collect();
+    table.push(cells("TOTAL", &total));
+    print_table(&header, &table, 1);
+    eprintln!(
+        "Since {since_day} (UTC). Cost is estimated at API list prices; subscription plans are not billed per token."
+    );
+    if total.unpriced > 0 {
+        eprintln!(
+            "{} request(s) from models without a known price are not in the cost.",
+            total.unpriced
+        );
+    }
+    Ok(0)
 }
 
 fn share(store: &Store, args: &ShareArgs) -> Result<i32> {

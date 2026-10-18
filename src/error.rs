@@ -27,6 +27,7 @@ pub enum Error {
         profile: String,
     },
     SameProfile(String),
+    BadSince(String),
     SourceMissing(String),
     Settings {
         path: String,
@@ -79,6 +80,7 @@ impl fmt::Display for Error {
                 "profile '{profile}' already has session {id}; pass --force to replace it"
             ),
             Error::SameProfile(n) => write!(f, "the session is already in '{n}'; name another profile"),
+            Error::BadSince(s) => write!(f, "invalid --since '{s}': use 7d, 30d, YYYY-MM-DD or all"),
             Error::UnknownItem(i) => write!(
                 f,
                 "cannot share '{i}': give a plain file or folder name such as skills or CLAUDE.md (logins and history are never shared)"

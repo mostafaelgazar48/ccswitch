@@ -27,6 +27,7 @@ $ ccswitch run work
 - [Commands](#commands)
 - [Profile per folder or shell](#profile-per-folder-or-shell)
 - [Hand off a conversation](#hand-off-a-conversation)
+- [Usage and cost](#usage-and-cost)
 - [Bypass permissions](#bypass-permissions)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -41,6 +42,7 @@ $ ccswitch run work
 - **A default profile.** `ccswitch run` uses it; `ccswitch run <name>` picks another.
 - **Profile per folder or shell.** A `.ccswitch` file makes a project always use its own account.
 - **Hand off a conversation.** Hit the usage limit on one account? Continue the same conversation on another with `ccswitch handoff`.
+- **Usage across accounts.** `ccswitch usage` adds up tokens and estimated cost for every profile, by day, model, profile or conversation.
 - **Every account at a glance.** `ccswitch status` shows each profile's login, plan and MCP servers.
 - **Passes Claude's own flags through.** `ccswitch run work -- --resume`.
 - **Bypass permissions per profile.** Turn prompt-free mode on for one profile and leave the others alone.
@@ -161,6 +163,7 @@ not touched.
 | `ccswitch status` (`st`) | Show each profile's account, org and plan, MCP servers, bypass mode and last use. `--json` for scripts. |
 | `ccswitch sessions [name] [--all]` | List saved conversations started in this folder (`--all`: every folder), newest first. |
 | `ccswitch handoff <to> [options]` | Copy a conversation to another profile and resume it there. See [Hand off a conversation](#hand-off-a-conversation). |
+| `ccswitch usage [name] [--since 7d] [--by day\|model\|profile\|session]` | Tokens and estimated cost for every profile (or one). See [Usage and cost](#usage-and-cost). |
 | `ccswitch env [name]` | Print commands that select a profile for this shell: `eval "$(ccswitch env work)"`. |
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
@@ -243,6 +246,28 @@ It copies the conversation log, its subagent and tool output folder, and its rew
 profile first, so nothing is written to the conversation while it's copied. If the conversation was
 started in another folder, Claude is started there, because `--resume` looks up conversations by
 folder.
+
+## Usage and cost
+
+`usage` reads the conversation logs Claude Code keeps in each profile and adds up the tokens, for all
+your accounts in one table:
+
+```console
+$ ccswitch usage --since 30d --by profile
+PROFILE   REQUESTS  INPUT     OUTPUT  CACHE WRITE   CACHE READ        TOTAL  EST. COST
+work         1,081  2,180    626,604    2,992,198  239,578,663  243,199,645     $79.09
+personal       842  1,690    512,210    2,410,120  101,220,431  104,144,451     $41.27
+TOTAL        1,923  3,870  1,138,814    5,402,318  340,799,094  347,344,096    $120.36
+```
+
+- `--since`: `7d` (default), `30d`, a date such as `2026-10-01`, or `all`. Days are UTC.
+- `--by`: `day` (default), `model`, `profile` or `session` (`profile/session-id`, ready for `handoff`).
+- `ccswitch usage work` covers one profile; `--json` prints the same numbers for scripts.
+
+The cost is an **estimate at Claude API list prices**, including cache writes and reads. Pro, Max and
+Team plans are not billed per token, so for them it shows what the same work would cost on the API.
+Models missing from the price table are counted but not priced, and the footer says how many. A
+conversation copied by `handoff` is counted once.
 
 ## VS Code
 
