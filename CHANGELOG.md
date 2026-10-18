@@ -6,6 +6,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `ccswitch share <name>` links CLAUDE.md, skills, agents, commands, plugins, hooks, output-styles and keybindings.json from `~/.claude` into a profile. Logins, history and projects stay separate.
+- `share --all` applies to every profile, `--status` shows what is shared, `--dry-run` previews, `--undo` removes the links, and `--force` moves a profile's own copy to `<name>.bak` before linking.
+- `share --only settings.json` copies the hooks, enabledPlugins, env, statusLine, outputStyle and extraKnownMarketplaces keys. Other keys, including the bypass setting, stay per profile.
+- `--only` accepts any plain file or folder name. Logins, history and projects are refused.
+- `ccswitch add <name> --share` shares as the profile is created.
+- `CCSWITCH_SHARE_FROM` sets the folder to share from (default `~/.claude`).
+- On Windows, folders fall back to a junction when symlinks aren't allowed.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added

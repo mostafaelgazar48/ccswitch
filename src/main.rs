@@ -3,6 +3,7 @@ mod cli;
 mod error;
 mod launch;
 mod settings;
+mod share;
 mod store;
 
 use clap::Parser;

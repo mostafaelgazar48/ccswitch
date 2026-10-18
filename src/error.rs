@@ -11,6 +11,8 @@ pub enum Error {
     ProgramNotFound { program: String, hint: &'static str },
     NeedsConfirmation(String),
     Aborted,
+    UnknownItem(String),
+    SourceMissing(String),
     Settings { path: String, message: String },
     Io { context: String, source: io::Error },
 }
@@ -46,6 +48,11 @@ impl fmt::Display for Error {
             }
             Error::NeedsConfirmation(n) => write!(f, "refusing to delete '{n}' without confirmation; pass --yes"),
             Error::Aborted => write!(f, "aborted"),
+            Error::UnknownItem(i) => write!(
+                f,
+                "cannot share '{i}': give a plain file or folder name such as skills or CLAUDE.md (logins and history are never shared)"
+            ),
+            Error::SourceMissing(p) => write!(f, "folder to share from not found: {p}; pass --from <dir>"),
             Error::Settings { path, message } => write!(f, "cannot update {path}: {message}"),
             Error::Io { context, source } => write!(f, "{context}: {source}"),
         }

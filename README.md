@@ -155,6 +155,8 @@ not touched.
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
 | `ccswitch code [name] [-- args…]` | Open VS Code so the Claude Code extension uses a profile. Opens the current folder unless you pass arguments after `--`. |
+| `ccswitch share <name\|--all> [options]` | Link shared config from `~/.claude` into profiles. See [Sharing config](#sharing-config). |
+| `ccswitch add <name> --share` | Create a profile and share config in one step. |
 | `ccswitch bypass <name> [on\|off]` | Show or change bypass mode saved on a profile. |
 | `ccswitch rename <old> <new>` (`mv`) | Rename a profile. Claude may ask you to log in again. |
 | `ccswitch remove <name>` (`rm`) | Delete a profile and its login. Asks first; `--yes` skips the question. |
@@ -208,6 +210,34 @@ Only one profile at a time? You can skip `ccswitch code` and set it once in your
 
 `ccswitch path work` prints the folder to use. This setting only works in user settings, not in a
 project's `.vscode/settings.json`.
+
+## Sharing config
+
+Profiles are isolated, but you may want the same CLAUDE.md, skills and agents everywhere.
+`share` symlinks them from one folder (`~/.claude`, or `$CCSWITCH_SHARE_FROM`, or `--from DIR`), so an
+edit in one place shows up in every profile.
+
+```sh
+ccswitch share work                     # link the defaults into one profile
+ccswitch share --all                    # every profile
+ccswitch add client --share             # share while creating
+ccswitch share work --status            # what is shared right now
+ccswitch share work --dry-run           # preview
+ccswitch share work --force             # replace its own copy, kept as <name>.bak
+ccswitch share work --undo              # remove the links
+ccswitch share work --only skills,hooks
+```
+
+Default items: `CLAUDE.md`, `skills`, `agents`, `commands`, `plugins`, `hooks`, `output-styles`,
+`keybindings.json`. A profile's own copy is never overwritten unless you pass `--force`.
+
+`--only settings.json` copies the `hooks`, `enabledPlugins`, `env`, `statusLine`, `outputStyle` and
+`extraKnownMarketplaces` keys into the profile's file. It is a copy, so run it again after you change
+the source. Everything else, including `permissions` and the bypass setting, stays per profile.
+
+Logins, history and projects (`.credentials.json`, `projects`, `history.jsonl`, …) are never shared.
+On Windows, folders use a junction if symlinks aren't allowed; linking a single file needs Developer
+Mode or administrator rights.
 
 ## Bypass permissions
 

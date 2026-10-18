@@ -1,11 +1,11 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n\n\
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n\n\
                   Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
@@ -24,6 +24,9 @@ pub enum Command {
         /// Make it the default profile (automatic when there is no default yet)
         #[arg(long)]
         default: bool,
+        /// Share CLAUDE.md, skills, agents and more from ~/.claude (see `ccswitch share`)
+        #[arg(long)]
+        share: bool,
     },
     /// List profiles (* marks the default)
     #[command(visible_alias = "ls")]
@@ -66,8 +69,40 @@ pub enum Command {
         /// Omit to show the current state
         state: Option<Toggle>,
     },
+    /// Share CLAUDE.md, skills, agents and more from ~/.claude into a profile
+    Share(ShareArgs),
     /// Print a profile's config directory (or the default's)
     Path { name: Option<String> },
+}
+
+#[derive(Args)]
+pub struct ShareArgs {
+    /// Profile to share into
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub name: Option<String>,
+    /// Apply to every profile
+    #[arg(long)]
+    pub all: bool,
+    /// Folder to share from [default: $CCSWITCH_SHARE_FROM, else ~/.claude]
+    #[arg(long, value_name = "DIR")]
+    pub from: Option<std::path::PathBuf>,
+    /// Items to share, comma separated. Default: CLAUDE.md, skills, agents, commands, plugins,
+    /// hooks, output-styles, keybindings.json. Add settings.json to copy its hooks, enabledPlugins,
+    /// env, statusLine, outputStyle and extraKnownMarketplaces keys (permissions stay per profile).
+    #[arg(long, value_delimiter = ',', value_name = "ITEMS")]
+    pub only: Vec<String>,
+    /// Replace a profile's own copy, keeping it as <name>.bak
+    #[arg(long, conflicts_with_all = ["undo", "status"])]
+    pub force: bool,
+    /// Remove the links instead of creating them
+    #[arg(long, conflicts_with = "status")]
+    pub undo: bool,
+    /// Show what is shared, without changing anything
+    #[arg(long)]
+    pub status: bool,
+    /// Show what would change, without changing anything
+    #[arg(long, conflicts_with = "status")]
+    pub dry_run: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

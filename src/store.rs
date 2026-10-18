@@ -201,7 +201,7 @@ fn private_dir(path: &Path, recursive: bool) -> io::Result<()> {
     builder.create(path)
 }
 
-fn write_atomic(path: &Path, contents: &str) -> Result<()> {
+pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, contents)
         .and_then(|()| fs::rename(&tmp, path))

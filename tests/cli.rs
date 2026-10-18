@@ -281,3 +281,198 @@ fn run_bypass_adds_flag_for_one_session() {
         "Bypass permissions for 'a': off\n"
     );
 }
+
+#[test]
+fn share_links_items_and_undo_removes_them() {
+    let sb = Sandbox::new("share");
+    assert!(sb.run(&["add", "work", "--no-login"]).status.success());
+    let src = sb.dir.join("shared");
+    fs::create_dir_all(src.join("skills")).unwrap();
+    fs::write(src.join("CLAUDE.md"), "hi").unwrap();
+    fs::write(src.join("settings.json"), "{}").unwrap();
+    let profile = PathBuf::from(sb.profile("work"));
+    fs::write(profile.join("agents"), "own").unwrap();
+    fs::create_dir_all(src.join("agents")).unwrap();
+
+    let from = src.display().to_string();
+    let out = sb.run(&["share", "work", "--from", &from]);
+    assert!(out.status.success());
+    assert_eq!(fs::read_to_string(profile.join("CLAUDE.md")).unwrap(), "hi");
+    assert!(fs::symlink_metadata(profile.join("skills"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(fs::symlink_metadata(profile.join("agents"))
+        .unwrap()
+        .file_type()
+        .is_file());
+    assert!(!profile.join("settings.json").exists());
+    assert!(sb.run(&["share", "work", "--from", &from]).status.success());
+
+    assert!(sb
+        .run(&["share", "work", "--from", &from, "--undo"])
+        .status
+        .success());
+    assert!(!profile.join("CLAUDE.md").exists());
+    assert!(profile.join("agents").is_file());
+
+    let bad = sb.run(&["share", "work", "--from", &from, "--only", "projects"]);
+    assert!(!bad.status.success());
+}
+
+fn is_link(path: &std::path::Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn shared_source(sb: &Sandbox) -> PathBuf {
+    let src = sb.dir.join("shared");
+    fs::create_dir_all(src.join("skills")).unwrap();
+    fs::write(src.join("CLAUDE.md"), "hi").unwrap();
+    src
+}
+
+#[test]
+fn share_force_moves_own_copy_to_backup() {
+    let sb = Sandbox::new("share-force");
+    sb.run(&["add", "work", "--no-login"]);
+    let src = shared_source(&sb);
+    let profile = PathBuf::from(sb.profile("work"));
+    fs::write(profile.join("CLAUDE.md"), "mine").unwrap();
+    fs::write(profile.join("CLAUDE.md.bak"), "older").unwrap();
+    let from = src.display().to_string();
+
+    let out = sb.run(&["share", "work", "--from", &from, "--force"]);
+    assert!(out.status.success());
+    assert!(is_link(&profile.join("CLAUDE.md")));
+    assert_eq!(
+        fs::read_to_string(profile.join("CLAUDE.md.bak")).unwrap(),
+        "older"
+    );
+    assert_eq!(
+        fs::read_to_string(profile.join("CLAUDE.md.bak2")).unwrap(),
+        "mine"
+    );
+}
+
+#[test]
+fn share_dry_run_changes_nothing() {
+    let sb = Sandbox::new("share-dry");
+    sb.run(&["add", "work", "--no-login"]);
+    let src = shared_source(&sb);
+    let profile = PathBuf::from(sb.profile("work"));
+    let from = src.display().to_string();
+
+    let out = sb.run(&["share", "work", "--from", &from, "--dry-run"]);
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("would link"));
+    assert!(!profile.join("skills").exists());
+    assert!(!profile.join("CLAUDE.md").exists());
+}
+
+#[test]
+fn share_all_and_status() {
+    let sb = Sandbox::new("share-all");
+    sb.run(&["add", "a", "--no-login"]);
+    sb.run(&["add", "b", "--no-login"]);
+    let src = shared_source(&sb);
+    let from = src.display().to_string();
+    fs::write(PathBuf::from(sb.profile("b")).join("skills"), "own").unwrap();
+
+    assert!(sb
+        .run(&["share", "--all", "--from", &from])
+        .status
+        .success());
+    assert!(is_link(&PathBuf::from(sb.profile("a")).join("skills")));
+    assert!(is_link(&PathBuf::from(sb.profile("b")).join("CLAUDE.md")));
+
+    let text = stdout(&sb.run(&["share", "--all", "--from", &from, "--status"]));
+    assert!(text.contains("a:") && text.contains("b:"));
+    assert!(text.contains("skills: own copy (not shared)"));
+    assert!(text.contains("CLAUDE.md: linked"));
+    assert!(text.contains("hooks: skipped (not in source)"));
+
+    assert!(!sb.run(&["share"]).status.success());
+    assert!(!sb.run(&["share", "a", "--all"]).status.success());
+}
+
+#[test]
+fn add_share_links_from_env_source() {
+    let sb = Sandbox::new("add-share");
+    let src = shared_source(&sb);
+    let out = sb
+        .cmd(&["add", "work", "--no-login", "--share"])
+        .env("CCSWITCH_SHARE_FROM", &src)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let profile = PathBuf::from(sb.profile("work"));
+    assert!(is_link(&profile.join("skills")));
+    assert!(is_link(&profile.join("CLAUDE.md")));
+
+    let missing = sb
+        .cmd(&["add", "other", "--no-login", "--share"])
+        .env("CCSWITCH_SHARE_FROM", sb.dir.join("projects"))
+        .output()
+        .unwrap();
+    assert!(missing.status.success(), "profile is still created");
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("could not share"));
+}
+
+#[test]
+fn share_settings_merges_shared_keys_only() {
+    let sb = Sandbox::new("share-settings");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["bypass", "work", "on"]);
+    let src = sb.dir.join("shared");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("settings.json"),
+        r#"{"hooks":{"x":1},"env":{"A":"1"},"permissions":{"defaultMode":"plan"},"model":"opus"}"#,
+    )
+    .unwrap();
+    let from = src.display().to_string();
+
+    let out = sb.run(&["share", "work", "--from", &from, "--only", "settings.json"]);
+    assert!(out.status.success());
+    let text = fs::read_to_string(PathBuf::from(sb.profile("work")).join("settings.json")).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["hooks"]["x"], 1);
+    assert_eq!(json["env"]["A"], "1");
+    assert_eq!(json["permissions"]["defaultMode"], "bypassPermissions");
+    assert!(json.get("model").is_none());
+
+    let again = stdout(&sb.run(&["share", "work", "--from", &from, "--only", "settings.json"]));
+    assert!(again.contains("in sync"));
+}
+
+#[test]
+fn share_refuses_logins_and_paths() {
+    let sb = Sandbox::new("share-private");
+    sb.run(&["add", "work", "--no-login"]);
+    let src = shared_source(&sb);
+    let from = src.display().to_string();
+    for bad in [".credentials.json", "projects", "../x", "a/b", ".."] {
+        let out = sb.run(&["share", "work", "--from", &from, "--only", bad]);
+        assert!(!out.status.success(), "{bad}");
+    }
+}
+
+#[test]
+fn remove_and_rename_leave_the_source_alone() {
+    let sb = Sandbox::new("share-remove");
+    sb.run(&["add", "work", "--no-login"]);
+    let src = shared_source(&sb);
+    fs::write(src.join("skills/s.md"), "x").unwrap();
+    let from = src.display().to_string();
+    sb.run(&["share", "work", "--from", &from]);
+
+    assert!(sb.run(&["rename", "work", "job"]).status.success());
+    assert!(PathBuf::from(sb.profile("job"))
+        .join("skills/s.md")
+        .exists());
+    assert!(sb.run(&["remove", "job", "--yes"]).status.success());
+    assert!(src.join("skills/s.md").exists());
+    assert!(src.join("CLAUDE.md").exists());
+}

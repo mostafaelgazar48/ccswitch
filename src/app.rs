@@ -1,9 +1,12 @@
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::{
+    io::{self, BufRead, IsTerminal, Write},
+    path::Path,
+};
 
 use crate::{
-    cli::{Command, Toggle},
+    cli::{Command, ShareArgs, Toggle},
     error::{Context, Error, Result},
-    launch,
+    launch, share,
     store::Store,
 };
 
@@ -18,7 +21,8 @@ pub fn run(command: Command) -> Result<i32> {
             name,
             no_login,
             default,
-        } => add(&store, &name, no_login, default),
+            share,
+        } => add(&store, &name, no_login, default, share),
         Command::List => list(&store),
         Command::Use { name } => {
             store.set_default(&name)?;
@@ -55,6 +59,7 @@ pub fn run(command: Command) -> Result<i32> {
             Ok(0)
         }
         Command::Remove { name, yes } => remove(&store, &name, yes),
+        Command::Share(args) => share(&store, &args),
         Command::Path { name } => {
             let (_, path) = store.resolve(name.as_deref())?;
             println!("{}", path.display());
@@ -63,7 +68,7 @@ pub fn run(command: Command) -> Result<i32> {
     }
 }
 
-fn add(store: &Store, name: &str, no_login: bool, make_default: bool) -> Result<i32> {
+fn add(store: &Store, name: &str, no_login: bool, make_default: bool, share: bool) -> Result<i32> {
     let path = store.create(name)?;
     let make_default = make_default
         || matches!(
@@ -77,6 +82,9 @@ fn add(store: &Store, name: &str, no_login: bool, make_default: bool) -> Result<
         "Created profile '{name}'{}",
         if make_default { " (default)" } else { "" }
     );
+    if share {
+        share_new(&path);
+    }
     if no_login {
         return Ok(0);
     }
@@ -108,6 +116,68 @@ fn list(store: &Store) -> Result<i32> {
         eprintln!("warning: default profile '{stale}' no longer exists");
     }
     Ok(0)
+}
+
+fn share(store: &Store, args: &ShareArgs) -> Result<i32> {
+    let names = match &args.name {
+        Some(name) => vec![name.clone()],
+        None => store.list()?,
+    };
+    if names.is_empty() {
+        eprintln!("No profiles yet. Create one with `ccswitch add <name>`.");
+        return Ok(0);
+    }
+    let profiles = names
+        .iter()
+        .map(|name| store.existing(name))
+        .collect::<Result<Vec<_>>>()?;
+    let items = share::check_items(&args.only)?;
+    let source = match &args.from {
+        Some(dir) => dir.clone(),
+        None => share::default_source()?,
+    };
+    let opts = share::Opts {
+        force: args.force,
+        dry_run: args.dry_run,
+    };
+    for (name, profile) in names.iter().zip(&profiles) {
+        let results = if args.status {
+            share::status(&source, profile, &items)?
+        } else if args.undo {
+            share::unlink(&source, profile, &items, opts)?
+        } else {
+            share::link(&source, profile, &items, opts)?
+        };
+        println!("{name}:");
+        for (item, outcome) in results {
+            println!("  {item}: {}", outcome.describe(args.dry_run));
+        }
+    }
+    Ok(0)
+}
+
+/// Links the default items into a freshly created profile. A problem here is reported but does not
+/// undo the profile.
+fn share_new(profile: &Path) {
+    let opts = share::Opts {
+        force: false,
+        dry_run: false,
+    };
+    let result = share::default_source().and_then(|source| {
+        let items = share::check_items(&[])?;
+        share::link(&source, profile, &items, opts)
+    });
+    match result {
+        Ok(results) => {
+            let linked: Vec<_> = results
+                .iter()
+                .filter(|(_, o)| *o == share::Outcome::Linked)
+                .map(|(item, _)| item.as_str())
+                .collect();
+            println!("Shared from your Claude folder: {}", linked.join(", "));
+        }
+        Err(e) => eprintln!("warning: could not share config: {e}"),
+    }
 }
 
 fn bypass(store: &Store, name: &str, state: Option<Toggle>) -> Result<i32> {
