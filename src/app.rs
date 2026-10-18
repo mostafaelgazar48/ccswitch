@@ -2,17 +2,17 @@ use std::{
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
     path::Path,
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use serde_json::json;
 
 use crate::{
     claude_json,
-    cli::{Command, ShareArgs, Toggle},
+    cli::{Command, HandoffArgs, ShareArgs, Toggle},
     date,
     error::{Context, Error, Result},
-    launch, share, shell,
+    launch, sessions, share, shell,
     store::{Source, Store},
 };
 
@@ -79,6 +79,10 @@ pub fn run(command: Command) -> Result<i32> {
             }
             launch::code(&path, &path.join(VSCODE_DATA_DIR), &args)
         }
+        Command::Sessions { name, all, limit } => {
+            list_sessions(&store, name.as_deref(), all, limit)
+        }
+        Command::Handoff(args) => handoff(&store, args),
         Command::Bypass { name, state } => bypass(&store, &name, state),
         Command::Rename { old, new } => {
             store.rename(&old, &new)?;
@@ -219,21 +223,128 @@ fn status(store: &Store, as_json: bool) -> Result<i32> {
 }
 
 /// Left-aligned columns separated by two spaces, without trailing spaces.
-fn print_table<const N: usize>(header: &[String; N], rows: &[[String; N]]) {
-    let mut widths = [0; N];
-    for row in std::iter::once(header).chain(rows) {
+fn print_table<R: AsRef<[String]>>(header: &[String], rows: &[R]) {
+    let mut widths = vec![0; header.len()];
+    for row in std::iter::once(header).chain(rows.iter().map(AsRef::as_ref)) {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = (*w).max(cell.chars().count());
         }
     }
-    for row in std::iter::once(header).chain(rows) {
+    for row in std::iter::once(header).chain(rows.iter().map(AsRef::as_ref)) {
         let line: Vec<String> = row
             .iter()
-            .zip(widths)
+            .zip(&widths)
             .map(|(cell, w)| format!("{cell:w$}"))
             .collect();
         println!("{}", line.join("  ").trim_end());
     }
+}
+
+fn current_dir() -> Result<std::path::PathBuf> {
+    env::current_dir().with_context(|| "finding the current folder".to_owned())
+}
+
+fn list_sessions(store: &Store, name: Option<&str>, all: bool, limit: usize) -> Result<i32> {
+    let (name, profile) = store.resolve(name)?;
+    let folder = if all { None } else { Some(current_dir()?) };
+    let found = sessions::list(&profile, folder.as_deref())?;
+    if found.is_empty() {
+        let where_ = if all {
+            ""
+        } else {
+            " for this folder (try --all)"
+        };
+        eprintln!("No sessions in '{name}'{where_}.");
+        return Ok(0);
+    }
+    let now = SystemTime::now();
+    let mut header = vec!["ID", "UPDATED", "TITLE"];
+    if all {
+        header.push("FOLDER");
+    }
+    let rows: Vec<Vec<String>> = found
+        .iter()
+        .take(limit)
+        .map(|s| {
+            let mut row = vec![
+                s.id.clone(),
+                date::ago(s.modified, now),
+                s.title.clone().unwrap_or_else(|| "(untitled)".to_owned()),
+            ];
+            if all {
+                row.push(s.cwd.clone().unwrap_or_else(|| s.slug.clone()));
+            }
+            row
+        })
+        .collect();
+    print_table(
+        &header.into_iter().map(String::from).collect::<Vec<_>>(),
+        &rows,
+    );
+    if found.len() > limit {
+        eprintln!("({} more; use -n to show more)", found.len() - limit);
+    }
+    Ok(0)
+}
+
+fn handoff(store: &Store, args: HandoffArgs) -> Result<i32> {
+    let (from_name, from) = store.resolve(args.from.as_deref())?;
+    let to = store.existing(&args.to)?;
+    if from_name == args.to {
+        return Err(Error::SameProfile(from_name));
+    }
+    let here = current_dir()?;
+    let session = match &args.session {
+        Some(id) => sessions::find(&from, id)?,
+        None => sessions::list(&from, Some(&here))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                Error::NoSession(format!("no sessions for this folder in '{from_name}'"))
+            })?,
+    };
+    if session.exists_in(&to) && !args.force {
+        return Err(Error::SessionExists {
+            id: session.id,
+            profile: args.to,
+        });
+    }
+    let age = SystemTime::now()
+        .duration_since(session.modified)
+        .unwrap_or_default();
+    if age < Duration::from_secs(60) {
+        eprintln!(
+            "warning: this conversation was updated just now; if Claude is still running it in '{from_name}', quit it there first"
+        );
+    }
+    session.copy(&from, &to)?;
+    if args.move_session {
+        session.remove(&from)?;
+    }
+    println!(
+        "{} \"{}\" ({}) from '{from_name}' to '{}'",
+        if args.move_session { "Moved" } else { "Copied" },
+        session.title.as_deref().unwrap_or("untitled"),
+        session.id,
+        args.to
+    );
+    if args.no_resume {
+        println!(
+            "Continue it with: ccswitch run {} -- --resume {}",
+            args.to, session.id
+        );
+        return Ok(0);
+    }
+    // Claude finds a session through the folder it was started in.
+    if sessions::slug(&here) != session.slug {
+        if let Some(dir) = session.cwd.as_deref().filter(|d| Path::new(d).is_dir()) {
+            env::set_current_dir(dir).with_context(|| format!("changing to {dir}"))?;
+            eprintln!("Resuming in {dir}");
+        }
+    }
+    let mut claude_args = vec!["--resume".to_owned(), session.id];
+    claude_args.extend(args.args);
+    launch::claude(&to, &claude_args)
 }
 
 fn share(store: &Store, args: &ShareArgs) -> Result<i32> {

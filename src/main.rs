@@ -4,6 +4,7 @@ mod cli;
 mod date;
 mod error;
 mod launch;
+mod sessions;
 mod settings;
 mod share;
 mod shell;

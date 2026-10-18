@@ -20,6 +20,13 @@ pub enum Error {
     NeedsConfirmation(String),
     Aborted,
     UnknownItem(String),
+    /// No session matched; the message says what was looked for.
+    NoSession(String),
+    SessionExists {
+        id: String,
+        profile: String,
+    },
+    SameProfile(String),
     SourceMissing(String),
     Settings {
         path: String,
@@ -66,6 +73,12 @@ impl fmt::Display for Error {
             }
             Error::NeedsConfirmation(n) => write!(f, "refusing to delete '{n}' without confirmation; pass --yes"),
             Error::Aborted => write!(f, "aborted"),
+            Error::NoSession(m) => write!(f, "{m}; list them with `ccswitch sessions <profile> --all`"),
+            Error::SessionExists { id, profile } => write!(
+                f,
+                "profile '{profile}' already has session {id}; pass --force to replace it"
+            ),
+            Error::SameProfile(n) => write!(f, "the session is already in '{n}'; name another profile"),
             Error::UnknownItem(i) => write!(
                 f,
                 "cannot share '{i}': give a plain file or folder name such as skills or CLAUDE.md (logins and history are never shared)"

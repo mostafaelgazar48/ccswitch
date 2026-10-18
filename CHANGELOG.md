@@ -18,6 +18,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - `ccswitch use <name> --here` writes a `.ccswitch` file, so the folder and its subfolders use that profile.
 - `ccswitch env [name]` prints shell commands that set `CLAUDE_CONFIG_DIR` and `CCSWITCH_PROFILE` for `eval`, for sh, fish and PowerShell. `--unset` clears them.
 - `CCSWITCH_PROFILE` picks the profile for a shell. Without a name, commands use it first, then the nearest `.ccswitch` file, then the default.
+- `ccswitch handoff <to>` copies the latest conversation in this folder (or `--session <id>`) to another profile, with its subagent output and rewind history, and resumes it there. `--from`, `--move`, `--force`, `--no-resume`, and Claude flags after `--`.
+- `ccswitch sessions [name]` lists saved conversations with their titles; `--all` covers every folder.
 
 ### Changed
 - `ccswitch current` prints the profile in use in this folder or shell, and says on stderr where the choice came from.

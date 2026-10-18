@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n\n\
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n\n\
                   Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_PROFILE Profile to use in this shell, before .ccswitch files and the default\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
@@ -75,6 +75,18 @@ pub enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// List a profile's saved Claude conversations started in this folder, newest first
+    Sessions {
+        name: Option<String>,
+        /// Include every folder, not just this one
+        #[arg(long)]
+        all: bool,
+        /// How many to show
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Continue a conversation on another profile, such as when one account hits its usage limit
+    Handoff(HandoffArgs),
     /// Rename a profile (Claude may ask you to log in again)
     #[command(visible_alias = "mv")]
     Rename { old: String, new: String },
@@ -96,6 +108,31 @@ pub enum Command {
     Share(ShareArgs),
     /// Print a profile's config directory (or the default's)
     Path { name: Option<String> },
+}
+
+#[derive(Args)]
+pub struct HandoffArgs {
+    /// Profile to continue on
+    pub to: String,
+    /// Profile the conversation is in [default: the one in use here]
+    #[arg(long, value_name = "NAME")]
+    pub from: Option<String>,
+    /// Session id or its first characters (see `ccswitch sessions`) [default: the latest one
+    /// started in this folder]
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
+    /// Remove the conversation from the old profile after copying it
+    #[arg(long = "move")]
+    pub move_session: bool,
+    /// Replace a copy the new profile already has
+    #[arg(long)]
+    pub force: bool,
+    /// Copy only; don't start Claude
+    #[arg(long)]
+    pub no_resume: bool,
+    /// More arguments for Claude, after --resume <id>
+    #[arg(last = true)]
+    pub args: Vec<String>,
 }
 
 #[derive(Args)]

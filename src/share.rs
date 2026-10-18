@@ -327,14 +327,14 @@ fn points_to(link: &Path, target: &Path) -> bool {
 }
 
 #[cfg(unix)]
-fn symlink(from: &Path, to: &Path) -> io::Result<()> {
+pub fn symlink(from: &Path, to: &Path) -> io::Result<()> {
     std::os::unix::fs::symlink(from, to)
 }
 
 /// Folders fall back to a junction, which needs no special rights. Files need Developer Mode or
 /// administrator rights.
 #[cfg(windows)]
-fn symlink(from: &Path, to: &Path) -> io::Result<()> {
+pub fn symlink(from: &Path, to: &Path) -> io::Result<()> {
     if from.is_dir() {
         std::os::windows::fs::symlink_dir(from, to).or_else(|e| {
             let status = std::process::Command::new("cmd")

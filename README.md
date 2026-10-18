@@ -26,6 +26,7 @@ $ ccswitch run work
 - [Quick start](#quick-start)
 - [Commands](#commands)
 - [Profile per folder or shell](#profile-per-folder-or-shell)
+- [Hand off a conversation](#hand-off-a-conversation)
 - [Bypass permissions](#bypass-permissions)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -39,6 +40,7 @@ $ ccswitch run work
 - **Isolated profiles.** Each one is a separate Claude Code config directory, so accounts never mix.
 - **A default profile.** `ccswitch run` uses it; `ccswitch run <name>` picks another.
 - **Profile per folder or shell.** A `.ccswitch` file makes a project always use its own account.
+- **Hand off a conversation.** Hit the usage limit on one account? Continue the same conversation on another with `ccswitch handoff`.
 - **Every account at a glance.** `ccswitch status` shows each profile's login, plan and MCP servers.
 - **Passes Claude's own flags through.** `ccswitch run work -- --resume`.
 - **Bypass permissions per profile.** Turn prompt-free mode on for one profile and leave the others alone.
@@ -157,6 +159,8 @@ not touched.
 | `ccswitch use <name> --here` | Make this folder (and its subfolders) use a profile. See [Profile per folder or shell](#profile-per-folder-or-shell). |
 | `ccswitch current` | Print the profile in use here. |
 | `ccswitch status` (`st`) | Show each profile's account, org and plan, MCP servers, bypass mode and last use. `--json` for scripts. |
+| `ccswitch sessions [name] [--all]` | List saved conversations started in this folder (`--all`: every folder), newest first. |
+| `ccswitch handoff <to> [options]` | Copy a conversation to another profile and resume it there. See [Hand off a conversation](#hand-off-a-conversation). |
 | `ccswitch env [name]` | Print commands that select a profile for this shell: `eval "$(ccswitch env work)"`. |
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
@@ -218,6 +222,27 @@ eval "$(ccswitch env --unset)"        # back to normal
 
 The shell is guessed from `$SHELL`; pass `--shell sh|fish|powershell` to choose. To show the profile in
 your prompt (bash/zsh): `PS1='${CCSWITCH_PROFILE:+($CCSWITCH_PROFILE) }'$PS1`.
+
+## Hand off a conversation
+
+Each account keeps its own conversation history, so when one account hits its usage limit, Claude
+can't continue that conversation on another. `handoff` copies it over and resumes it:
+
+```sh
+ccswitch handoff personal                    # latest conversation in this folder → "personal"
+ccswitch handoff personal --from work        # take it from a profile other than the one in use
+ccswitch sessions work                       # list conversations and their ids
+ccswitch handoff personal --session 61252340 # pick one by id (the first characters are enough)
+ccswitch handoff personal --move             # remove it from the old profile afterwards
+ccswitch handoff personal --no-resume        # copy only
+ccswitch handoff personal -- --model opus    # more flags for Claude after --
+```
+
+It copies the conversation log, its subagent and tool output folder, and its rewind history
+(`file-history`). The old profile keeps its copy unless you pass `--move`. Quit Claude in the old
+profile first, so nothing is written to the conversation while it's copied. If the conversation was
+started in another folder, Claude is started there, because `--resume` looks up conversations by
+folder.
 
 ## VS Code
 

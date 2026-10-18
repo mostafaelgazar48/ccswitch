@@ -607,3 +607,152 @@ fn env_prints_shell_commands() {
     assert!(stdout(&sb.run(&["env", "--shell", "pwsh"])).starts_with("$env:CLAUDE_CONFIG_DIR = '"));
     assert!(!sb.run(&["env", "work", "--unset"]).status.success());
 }
+
+/// Claude's `projects/` folder name for the sandbox, which is the commands' working folder.
+fn sandbox_slug(sb: &Sandbox) -> String {
+    fs::canonicalize(&sb.dir)
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// Writes a saved conversation with a subagent folder and rewind history into `profile`.
+fn fake_session(sb: &Sandbox, profile: &str, id: &str, title: &str) -> PathBuf {
+    let root = PathBuf::from(sb.profile(profile));
+    let project = root.join("projects").join(sandbox_slug(sb));
+    fs::create_dir_all(project.join(id).join("subagents")).unwrap();
+    let cwd = fs::canonicalize(&sb.dir).unwrap();
+    fs::write(
+        project.join(format!("{id}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"cwd\":{cwd:?},\"sessionId\":\"{id}\"}}\n{{\"type\":\"ai-title\",\"aiTitle\":\"{title}\"}}\n"
+        ),
+    )
+    .unwrap();
+    fs::write(project.join(id).join("subagents/a.jsonl"), "{}\n").unwrap();
+    fs::create_dir_all(root.join("file-history").join(id)).unwrap();
+    fs::write(root.join("file-history").join(id).join("v1"), "old").unwrap();
+    project
+}
+
+#[test]
+fn sessions_lists_this_folder() {
+    let sb = Sandbox::new("sessions");
+    sb.run(&["add", "work", "--no-login"]);
+    assert!(stderr(&sb.run(&["sessions"])).contains("No sessions"));
+    fake_session(&sb, "work", "aaaa-1111", "Fix the login bug");
+    let text = stdout(&sb.run(&["sessions"]));
+    assert!(text.starts_with("ID"), "{text}");
+    assert!(
+        text.contains("aaaa-1111") && text.contains("Fix the login bug"),
+        "{text}"
+    );
+    assert!(stdout(&sb.run(&["sessions", "work", "--all"])).contains("FOLDER"));
+}
+
+#[test]
+fn handoff_copies_the_latest_session_and_resumes_it() {
+    let sb = Sandbox::new("handoff");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["add", "personal", "--no-login"]);
+    let slug = sandbox_slug(&sb);
+    fake_session(&sb, "work", "aaaa-1111", "Old one");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fake_session(&sb, "work", "bbbb-2222", "Latest");
+
+    let out = sb.run(&["handoff", "personal", "--", "--model", "opus"]);
+    assert_eq!(out.status.code(), Some(7), "{}", stderr(&out));
+    assert!(stdout(&out).contains("Copied \"Latest\" (bbbb-2222) from 'work' to 'personal'"));
+    assert_eq!(
+        sb.called(),
+        [
+            sb.profile("personal"),
+            "--resume".into(),
+            "bbbb-2222".into(),
+            "--model".into(),
+            "opus".into()
+        ]
+    );
+    let to = PathBuf::from(sb.profile("personal"));
+    let project = to.join("projects").join(&slug);
+    assert!(project.join("bbbb-2222.jsonl").is_file());
+    assert!(project.join("bbbb-2222/subagents/a.jsonl").is_file());
+    assert_eq!(
+        fs::read_to_string(to.join("file-history/bbbb-2222/v1")).unwrap(),
+        "old"
+    );
+    assert!(!project.join("aaaa-1111.jsonl").exists());
+    let from = PathBuf::from(sb.profile("work"))
+        .join("projects")
+        .join(&slug);
+    assert!(
+        from.join("bbbb-2222.jsonl").is_file(),
+        "copy keeps the original"
+    );
+
+    let again = sb.run(&["handoff", "personal", "--no-resume"]);
+    assert!(
+        stderr(&again).contains("already has session bbbb-2222"),
+        "{}",
+        stderr(&again)
+    );
+    let forced = sb.run(&["handoff", "personal", "--no-resume", "--force"]);
+    assert!(forced.status.success(), "{}", stderr(&forced));
+    assert!(stdout(&forced).contains("ccswitch run personal -- --resume bbbb-2222"));
+}
+
+#[test]
+fn handoff_by_id_with_move() {
+    let sb = Sandbox::new("handoff-move");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["add", "personal", "--no-login"]);
+    let from = fake_session(&sb, "work", "aaaa-1111", "One");
+    fake_session(&sb, "work", "aaab-2222", "Two");
+
+    let ambiguous = sb.run(&["handoff", "personal", "--session", "aaa", "--no-resume"]);
+    assert!(
+        stderr(&ambiguous).contains("matches 2 sessions"),
+        "{}",
+        stderr(&ambiguous)
+    );
+    assert!(
+        stderr(&sb.run(&["handoff", "personal", "--session", "zz"])).contains("no session 'zz'")
+    );
+    assert!(stderr(&sb.run(&["handoff", "work"])).contains("already in 'work'"));
+
+    let out = sb.run(&[
+        "handoff",
+        "personal",
+        "--from",
+        "work",
+        "--session",
+        "aaaa",
+        "--move",
+        "--no-resume",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).starts_with("Moved \"One\""));
+    assert!(!from.join("aaaa-1111.jsonl").exists());
+    assert!(!from.join("aaaa-1111").exists());
+    assert!(!PathBuf::from(sb.profile("work"))
+        .join("file-history/aaaa-1111")
+        .exists());
+    assert!(from.join("aaab-2222.jsonl").exists());
+    assert!(stdout(&sb.run(&["sessions", "personal"])).contains("aaaa-1111"));
+}
+
+#[test]
+fn handoff_without_sessions_is_explained() {
+    let sb = Sandbox::new("handoff-none");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["add", "personal", "--no-login"]);
+    let out = sb.run(&["handoff", "personal"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("no sessions for this folder in 'work'"),
+        "{}",
+        stderr(&out)
+    );
+}

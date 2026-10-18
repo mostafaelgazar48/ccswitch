@@ -6,6 +6,7 @@ use std::{
 use crate::{
     error::{Context, Error, Result},
     settings::{self, Settings},
+    share,
 };
 
 pub const MAX_NAME_LEN: usize = 64;
@@ -290,6 +291,40 @@ fn private_dir(path: &Path, recursive: bool) -> io::Result<()> {
         builder.mode(0o700);
     }
     builder.create(path)
+}
+
+/// Copies a file or folder tree. Links are recreated as links, not followed. `skip` gets each
+/// entry's path relative to `from`.
+pub fn copy_tree(from: &Path, to: &Path, skip: &dyn Fn(&Path) -> bool) -> Result<()> {
+    copy_entry(from, to, Path::new(""), skip)
+}
+
+fn copy_entry(from: &Path, to: &Path, rel: &Path, skip: &dyn Fn(&Path) -> bool) -> Result<()> {
+    let meta = fs::symlink_metadata(from).with_context(|| format!("reading {}", from.display()))?;
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(from).with_context(|| format!("reading {}", from.display()))?;
+        return share::symlink(&target, to).with_context(|| format!("linking {}", to.display()));
+    }
+    if !meta.is_dir() {
+        return fs::copy(from, to)
+            .map(drop)
+            .with_context(|| format!("copying {}", from.display()));
+    }
+    match fs::create_dir(to) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
+            return Err(Error::io(format!("creating {}", to.display()), e))
+        }
+        _ => {}
+    }
+    let entries = fs::read_dir(from).with_context(|| format!("reading {}", from.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading {}", from.display()))?;
+        let rel = rel.join(entry.file_name());
+        if !skip(&rel) {
+            copy_entry(&entry.path(), &to.join(entry.file_name()), &rel, skip)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn write_atomic(path: &Path, contents: &str) -> Result<()> {
