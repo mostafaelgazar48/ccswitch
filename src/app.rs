@@ -1,13 +1,19 @@
 use std::{
+    env, fs,
     io::{self, BufRead, IsTerminal, Write},
     path::Path,
+    time::SystemTime,
 };
 
+use serde_json::json;
+
 use crate::{
+    claude_json,
     cli::{Command, ShareArgs, Toggle},
+    date,
     error::{Context, Error, Result},
-    launch, share,
-    store::Store,
+    launch, share, shell,
+    store::{Source, Store},
 };
 
 /// VS Code's user data for `ccswitch code`, kept inside the profile so rename and remove cover it.
@@ -24,14 +30,35 @@ pub fn run(command: Command) -> Result<i32> {
             share,
         } => add(&store, &name, no_login, default, share),
         Command::List => list(&store),
-        Command::Use { name } => {
+        Command::Use { name, here: false } => {
             store.set_default(&name)?;
             println!("Default profile: {name}");
             Ok(0)
         }
+        Command::Use { name, here: true } => {
+            let dir =
+                env::current_dir().with_context(|| "finding the current folder".to_owned())?;
+            let file = store.pin_folder(&dir, &name)?;
+            println!("This folder now uses '{name}' ({})", file.display());
+            Ok(0)
+        }
         Command::Current => {
-            let (name, _) = store.resolve(None)?;
+            let (name, _, source) = store.resolve_with_source(None)?;
             println!("{name}");
+            if source != Source::Default {
+                eprintln!("(from {})", source.describe());
+            }
+            Ok(0)
+        }
+        Command::Status { json } => status(&store, json),
+        Command::Env { name, shell, unset } => {
+            let shell = shell.unwrap_or_else(shell::guess);
+            if unset {
+                print!("{}", shell::unset(shell));
+            } else {
+                let (name, path) = store.resolve(name.as_deref())?;
+                print!("{}", shell::set(shell, &path.display().to_string(), &name));
+            }
             Ok(0)
         }
         Command::Run {
@@ -72,7 +99,7 @@ fn add(store: &Store, name: &str, no_login: bool, make_default: bool, share: boo
     let path = store.create(name)?;
     let make_default = make_default
         || matches!(
-            store.resolve(None),
+            store.resolve_default(),
             Err(Error::NoDefault | Error::DefaultMissing(_))
         );
     if make_default {
@@ -116,6 +143,97 @@ fn list(store: &Store) -> Result<i32> {
         eprintln!("warning: default profile '{stale}' no longer exists");
     }
     Ok(0)
+}
+
+fn status(store: &Store, as_json: bool) -> Result<i32> {
+    let names = store.list()?;
+    let default = store.default_name()?;
+    let now = SystemTime::now();
+    let mut rows = Vec::new();
+    let mut objects = Vec::new();
+    for name in &names {
+        let profile = store.existing(name)?;
+        let config = claude_json::read(&profile);
+        let account = config.as_ref().ok().and_then(claude_json::account);
+        let mcp = config
+            .as_ref()
+            .map_or(0, |c| claude_json::mcp_servers(c).len());
+        let bypass = store.bypass(name).unwrap_or(false);
+        let last_used = fs::metadata(profile.join("history.jsonl"))
+            .and_then(|m| m.modified())
+            .ok();
+        let is_default = default.as_deref() == Some(name.as_str());
+        if as_json {
+            objects.push(json!({
+                "name": name,
+                "default": is_default,
+                "email": account.as_ref().map(|a| &a.email),
+                "organization": account.as_ref().map(|a| &a.org),
+                "plan": account.as_ref().map(|a| &a.plan),
+                "mcpServers": mcp,
+                "bypass": bypass,
+                "lastUsed": last_used
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs()),
+            }));
+            continue;
+        }
+        let (email, org) = match (&config, &account) {
+            (Err(_), _) => (".claude.json unreadable".to_owned(), "-".to_owned()),
+            (_, None) => ("not logged in".to_owned(), "-".to_owned()),
+            (_, Some(a)) => (a.email.clone(), a.org_and_plan()),
+        };
+        rows.push([
+            if is_default { "*" } else { " " }.to_owned(),
+            name.clone(),
+            email,
+            org,
+            mcp.to_string(),
+            if bypass { "on" } else { "off" }.to_owned(),
+            last_used.map_or("never".to_owned(), |t| date::ago(t, now)),
+        ]);
+    }
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&objects).expect("JSON always serializes")
+        );
+        return Ok(0);
+    }
+    if names.is_empty() {
+        eprintln!("No profiles yet. Create one with `ccswitch add <name>`.");
+        return Ok(0);
+    }
+    let header = [
+        "",
+        "NAME",
+        "ACCOUNT",
+        "ORG / PLAN",
+        "MCP",
+        "BYPASS",
+        "LAST USED",
+    ]
+    .map(String::from);
+    print_table(&header, &rows);
+    Ok(0)
+}
+
+/// Left-aligned columns separated by two spaces, without trailing spaces.
+fn print_table<const N: usize>(header: &[String; N], rows: &[[String; N]]) {
+    let mut widths = [0; N];
+    for row in std::iter::once(header).chain(rows) {
+        for (w, cell) in widths.iter_mut().zip(row) {
+            *w = (*w).max(cell.chars().count());
+        }
+    }
+    for row in std::iter::once(header).chain(rows) {
+        let line: Vec<String> = row
+            .iter()
+            .zip(widths)
+            .map(|(cell, w)| format!("{cell:w$}"))
+            .collect();
+        println!("{}", line.join("  ").trim_end());
+    }
 }
 
 fn share(store: &Store, args: &ShareArgs) -> Result<i32> {

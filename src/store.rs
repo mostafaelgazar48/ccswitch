@@ -10,6 +10,18 @@ use crate::{
 
 pub const MAX_NAME_LEN: usize = 64;
 
+/// Names the profile a folder uses; looked up in the current folder and its parents.
+pub const FOLDER_FILE: &str = ".ccswitch";
+
+/// Where a resolved profile name came from.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Source {
+    Arg,
+    Env,
+    File(PathBuf),
+    Default,
+}
+
 pub fn validate_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
         && name.len() <= MAX_NAME_LEN
@@ -27,6 +39,10 @@ pub fn validate_name(name: &str) -> Result<()> {
 /// Profiles on disk: `<root>/profiles/<name>/` plus a `<root>/default` file naming the default.
 pub struct Store {
     root: PathBuf,
+    /// `$CCSWITCH_PROFILE`, which beats a folder's `.ccswitch` file.
+    env_profile: Option<String>,
+    /// Where to start looking for a `.ccswitch` file.
+    cwd: Option<PathBuf>,
 }
 
 impl Store {
@@ -35,11 +51,18 @@ impl Store {
             Some(p) if !p.is_empty() => PathBuf::from(p),
             _ => dirs::home_dir().ok_or(Error::NoHome)?.join(".ccswitch"),
         };
-        Ok(Self::new(root))
+        let mut store = Self::new(root);
+        store.env_profile = env::var("CCSWITCH_PROFILE").ok().filter(|p| !p.is_empty());
+        store.cwd = env::current_dir().ok();
+        Ok(store)
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            env_profile: None,
+            cwd: None,
+        }
     }
 
     fn profiles_dir(&self) -> PathBuf {
@@ -168,16 +191,84 @@ impl Store {
         Ok((file, settings))
     }
 
-    /// The named profile, or the default when no name is given.
+    /// The named profile, or the one picked for this shell or folder, or the default.
     pub fn resolve(&self, name: Option<&str>) -> Result<(String, PathBuf)> {
-        if let Some(name) = name {
-            return Ok((name.to_owned(), self.existing(name)?));
-        }
+        self.resolve_with_source(name)
+            .map(|(name, path, _)| (name, path))
+    }
+
+    /// Like `resolve`, also saying why that profile was picked. Lookup order: the name given,
+    /// `$CCSWITCH_PROFILE`, the nearest `.ccswitch` file, the default.
+    pub fn resolve_with_source(&self, name: Option<&str>) -> Result<(String, PathBuf, Source)> {
+        let (name, source) = match (name, &self.env_profile) {
+            (Some(name), _) => (name.to_owned(), Source::Arg),
+            (None, Some(name)) => (name.clone(), Source::Env),
+            (None, None) => match self.folder_profile()? {
+                Some((name, file)) => (name, Source::File(file)),
+                None => {
+                    let (name, path) = self.resolve_default()?;
+                    return Ok((name, path, Source::Default));
+                }
+            },
+        };
+        let path = match (&source, self.existing(&name)) {
+            (_, Ok(path)) => path,
+            (Source::Arg, Err(e)) => return Err(e),
+            (_, Err(Error::NotFound(_) | Error::InvalidName(_))) => {
+                return Err(Error::PinnedMissing {
+                    name,
+                    from: source.describe(),
+                })
+            }
+            (_, Err(e)) => return Err(e),
+        };
+        Ok((name, path, source))
+    }
+
+    /// The default profile, ignoring `$CCSWITCH_PROFILE` and `.ccswitch` files.
+    pub fn resolve_default(&self) -> Result<(String, PathBuf)> {
         let name = self.default_name()?.ok_or(Error::NoDefault)?;
         match self.existing(&name) {
             Ok(path) => Ok((name, path)),
             Err(Error::NotFound(_) | Error::InvalidName(_)) => Err(Error::DefaultMissing(name)),
             Err(e) => Err(e),
+        }
+    }
+
+    /// The profile named by the nearest `.ccswitch` file, and that file.
+    fn folder_profile(&self) -> Result<Option<(String, PathBuf)>> {
+        let Some(cwd) = &self.cwd else {
+            return Ok(None);
+        };
+        for dir in cwd.ancestors() {
+            let file = dir.join(FOLDER_FILE);
+            if !file.is_file() {
+                continue;
+            }
+            let text =
+                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            let name = text.lines().map(str::trim).find(|l| !l.is_empty());
+            return Ok(Some((name.unwrap_or_default().to_owned(), file)));
+        }
+        Ok(None)
+    }
+
+    /// Makes `dir` use `name` by writing a `.ccswitch` file there.
+    pub fn pin_folder(&self, dir: &Path, name: &str) -> Result<PathBuf> {
+        self.existing(name)?;
+        let file = dir.join(FOLDER_FILE);
+        write_atomic(&file, &format!("{name}\n"))?;
+        Ok(file)
+    }
+}
+
+impl Source {
+    pub fn describe(&self) -> String {
+        match self {
+            Source::Arg => "the command line".to_owned(),
+            Source::Env => "$CCSWITCH_PROFILE".to_owned(),
+            Source::File(file) => file.display().to_string(),
+            Source::Default => "the default".to_owned(),
         }
     }
 }

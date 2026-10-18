@@ -8,13 +8,27 @@ pub enum Error {
     AlreadyExists(String),
     NoDefault,
     DefaultMissing(String),
-    ProgramNotFound { program: String, hint: &'static str },
+    /// A profile named by `$CCSWITCH_PROFILE` or a `.ccswitch` file that doesn't exist.
+    PinnedMissing {
+        name: String,
+        from: String,
+    },
+    ProgramNotFound {
+        program: String,
+        hint: &'static str,
+    },
     NeedsConfirmation(String),
     Aborted,
     UnknownItem(String),
     SourceMissing(String),
-    Settings { path: String, message: String },
-    Io { context: String, source: io::Error },
+    Settings {
+        path: String,
+        message: String,
+    },
+    Io {
+        context: String,
+        source: io::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -42,6 +56,10 @@ impl fmt::Display for Error {
             Error::DefaultMissing(n) => write!(
                 f,
                 "default profile '{n}' no longer exists; pick another with `ccswitch use <name>`"
+            ),
+            Error::PinnedMissing { name, from } => write!(
+                f,
+                "profile '{name}' (from {from}) not found; create it with `ccswitch add {name}` or change {from}"
             ),
             Error::ProgramNotFound { program, hint } => {
                 write!(f, "could not run '{program}': not found ({hint})")

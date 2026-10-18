@@ -32,6 +32,8 @@ impl Sandbox {
         cmd.args(args)
             .env("CCSWITCH_HOME", self.dir.join("home"))
             .env("CCSWITCH_CLAUDE", self.dir.join("fake-claude"))
+            .env_remove("CCSWITCH_PROFILE")
+            .current_dir(&self.dir)
             .stdin(Stdio::null());
         cmd
     }
@@ -475,4 +477,133 @@ fn remove_and_rename_leave_the_source_alone() {
     assert!(sb.run(&["remove", "job", "--yes"]).status.success());
     assert!(src.join("skills/s.md").exists());
     assert!(src.join("CLAUDE.md").exists());
+}
+
+#[test]
+fn status_shows_each_account() {
+    let sb = Sandbox::new("status");
+    sb.run(&["add", "work", "--no-login"]);
+    sb.run(&["add", "home", "--no-login"]);
+    sb.run(&["bypass", "work", "on"]);
+    fs::write(
+        PathBuf::from(sb.profile("work")).join(".claude.json"),
+        r#"{"oauthAccount":{"emailAddress":"me@acme.com","organizationName":"Acme","organizationType":"claude_team"},
+            "mcpServers":{"a":{},"b":{}}}"#,
+    )
+    .unwrap();
+    fs::write(PathBuf::from(sb.profile("work")).join("history.jsonl"), "").unwrap();
+
+    let out = sb.run(&["status"]);
+    assert!(out.status.success());
+    let text = stdout(&out);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "{text}");
+    assert!(lines[0].contains("ACCOUNT"));
+    assert!(
+        lines[1].contains("home")
+            && lines[1].contains("not logged in")
+            && lines[1].contains("never")
+    );
+    assert!(lines[2].starts_with("*  work"), "{text}");
+    for want in ["me@acme.com", "Acme (team)", "2", "on", "just now"] {
+        assert!(lines[2].contains(want), "{want} in {text}");
+    }
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&sb.run(&["st", "--json"]).stdout).unwrap();
+    assert_eq!(json[1]["email"], "me@acme.com");
+    assert_eq!(json[1]["mcpServers"], 2);
+    assert_eq!(json[0]["email"], serde_json::Value::Null);
+}
+
+#[test]
+fn folder_file_and_env_pick_the_profile() {
+    let sb = Sandbox::new("folder");
+    sb.run(&["add", "personal", "--no-login"]);
+    sb.run(&["add", "client", "--no-login"]);
+    let project = sb.dir.join("project");
+    let nested = project.join("src/deep");
+    fs::create_dir_all(&nested).unwrap();
+
+    let out = sb
+        .cmd(&["use", "client", "--here"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        fs::read_to_string(project.join(".ccswitch")).unwrap(),
+        "client\n"
+    );
+
+    let current = sb.cmd(&["current"]).current_dir(&nested).output().unwrap();
+    assert_eq!(stdout(&current), "client\n");
+    assert!(stderr(&current).contains(".ccswitch"));
+    sb.cmd(&["run"]).current_dir(&nested).output().unwrap();
+    assert_eq!(sb.called(), [sb.profile("client")]);
+    assert_eq!(
+        stdout(&sb.run(&["current"])),
+        "personal\n",
+        "outside the folder"
+    );
+
+    let env = |args: &[&str]| {
+        sb.cmd(args)
+            .current_dir(&nested)
+            .env("CCSWITCH_PROFILE", "personal")
+            .output()
+            .unwrap()
+    };
+    env(&["run"]);
+    assert_eq!(
+        sb.called(),
+        [sb.profile("personal")],
+        "$CCSWITCH_PROFILE wins"
+    );
+    assert!(stderr(&env(&["current"])).contains("$CCSWITCH_PROFILE"));
+
+    fs::write(project.join(".ccswitch"), "gone\n").unwrap();
+    let out = sb.cmd(&["run"]).current_dir(&nested).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("profile 'gone' (from "),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        sb.cmd(&["run", "client"])
+            .current_dir(&nested)
+            .output()
+            .unwrap()
+            .status
+            .code()
+            == Some(7)
+    );
+    assert!(!sb.run(&["use", "ghost", "--here"]).status.success());
+}
+
+#[test]
+fn env_prints_shell_commands() {
+    let sb = Sandbox::new("env");
+    sb.run(&["add", "work", "--no-login"]);
+    let out = sb.run(&["env", "work", "--shell", "bash"]);
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "export CLAUDE_CONFIG_DIR='{}'\nexport CCSWITCH_PROFILE='work'\n",
+            sb.profile("work")
+        )
+    );
+    let fish = sb
+        .cmd(&["env"])
+        .env("SHELL", "/usr/bin/fish")
+        .output()
+        .unwrap();
+    assert!(stdout(&fish).starts_with("set -gx CLAUDE_CONFIG_DIR '"));
+    assert_eq!(
+        stdout(&sb.run(&["env", "--unset", "--shell", "sh"])),
+        "unset CLAUDE_CONFIG_DIR CCSWITCH_PROFILE\n"
+    );
+    assert!(stdout(&sb.run(&["env", "--shell", "pwsh"])).starts_with("$env:CLAUDE_CONFIG_DIR = '"));
+    assert!(!sb.run(&["env", "work", "--unset"]).status.success());
 }

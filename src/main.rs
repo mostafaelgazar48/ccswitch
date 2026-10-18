@@ -1,9 +1,12 @@
 mod app;
+mod claude_json;
 mod cli;
+mod date;
 mod error;
 mod launch;
 mod settings;
 mod share;
+mod shell;
 mod store;
 
 use clap::Parser;

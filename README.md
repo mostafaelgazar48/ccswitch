@@ -25,6 +25,7 @@ $ ccswitch run work
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Commands](#commands)
+- [Profile per folder or shell](#profile-per-folder-or-shell)
 - [Bypass permissions](#bypass-permissions)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -37,6 +38,8 @@ $ ccswitch run work
 
 - **Isolated profiles.** Each one is a separate Claude Code config directory, so accounts never mix.
 - **A default profile.** `ccswitch run` uses it; `ccswitch run <name>` picks another.
+- **Profile per folder or shell.** A `.ccswitch` file makes a project always use its own account.
+- **Every account at a glance.** `ccswitch status` shows each profile's login, plan and MCP servers.
 - **Passes Claude's own flags through.** `ccswitch run work -- --resume`.
 - **Bypass permissions per profile.** Turn prompt-free mode on for one profile and leave the others alone.
 - **Safe by default.** Profile folders are private (`0700`), deleting asks for confirmation, and
@@ -151,7 +154,10 @@ not touched.
 | `ccswitch add <name> --default` | Create a profile and make it the default. |
 | `ccswitch list` (`ls`) | List profiles. `*` marks the default, `(bypass)` marks bypass mode. |
 | `ccswitch use <name>` | Set the default profile. |
-| `ccswitch current` | Print the default profile's name. |
+| `ccswitch use <name> --here` | Make this folder (and its subfolders) use a profile. See [Profile per folder or shell](#profile-per-folder-or-shell). |
+| `ccswitch current` | Print the profile in use here. |
+| `ccswitch status` (`st`) | Show each profile's account, org and plan, MCP servers, bypass mode and last use. `--json` for scripts. |
+| `ccswitch env [name]` | Print commands that select a profile for this shell: `eval "$(ccswitch env work)"`. |
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
 | `ccswitch code [name] [-- args…]` | Open VS Code so the Claude Code extension uses a profile. Opens the current folder unless you pass arguments after `--`. |
@@ -181,6 +187,37 @@ cd "$(ccswitch path work)"      # open a profile's folder
 echo "Using $(ccswitch current)"
 alias cw='ccswitch run work --'  # shell shortcut: cw --resume
 ```
+
+## Profile per folder or shell
+
+Which profile `run`, `code`, `path` and `env` use when you don't name one:
+
+1. `$CCSWITCH_PROFILE`, set for the current shell by `ccswitch env`;
+2. the nearest `.ccswitch` file in this folder or a parent folder;
+3. the default profile (`ccswitch use <name>`).
+
+```sh
+cd ~/clients/acme
+ccswitch use acme --here      # writes ./.ccswitch; this folder and its subfolders now use "acme"
+ccswitch run                  # starts Claude logged in as acme
+ccswitch current              # prints "acme" (stderr says it came from .ccswitch)
+```
+
+`.ccswitch` holds only the profile name, so you can commit it or add it to `.gitignore`. If it names a
+profile that doesn't exist, ccswitch stops with an error instead of falling back to another account.
+
+`ccswitch env` sets `CLAUDE_CONFIG_DIR` and `CCSWITCH_PROFILE` in your current shell. After that,
+plain `claude`, scripts and other tools use the profile too:
+
+```sh
+eval "$(ccswitch env work)"           # bash, zsh
+ccswitch env work | source            # fish
+ccswitch env work | Invoke-Expression # PowerShell
+eval "$(ccswitch env --unset)"        # back to normal
+```
+
+The shell is guessed from `$SHELL`; pass `--shell sh|fish|powershell` to choose. To show the profile in
+your prompt (bash/zsh): `PS1='${CCSWITCH_PROFILE:+($CCSWITCH_PROFILE) }'$PS1`.
 
 ## VS Code
 
@@ -283,6 +320,7 @@ all behave exactly as if you had run `claude` directly.
 | Variable          | Default       | Purpose                                     |
 |-------------------|---------------|---------------------------------------------|
 | `CCSWITCH_HOME`   | `~/.ccswitch` | Where profiles are stored                   |
+| `CCSWITCH_PROFILE` | (none)       | Profile for this shell; set by `ccswitch env` |
 | `CCSWITCH_CLAUDE` | `claude`      | The Claude Code program to run (name or path) |
 | `CCSWITCH_CODE`   | `code`        | The VS Code program to run (name or path)   |
 
@@ -293,6 +331,7 @@ all behave exactly as if you had run `claude` directly.
 | `could not run 'claude': not found` | Install Claude Code, or point `CCSWITCH_CLAUDE` to it. |
 | `could not run 'code': not found` | In VS Code, run **Shell Command: Install 'code' command in PATH**, or point `CCSWITCH_CODE` to it (for example `codium` or `cursor`). |
 | `no default profile` | Run `ccswitch use <name>`, or pass a name: `ccswitch run work`. |
+| `profile 'x' (from …/.ccswitch) not found` | Create the profile, or edit or delete that `.ccswitch` file. With `$CCSWITCH_PROFILE`, run `eval "$(ccswitch env --unset)"`. |
 | `default profile 'x' no longer exists` | The folder was deleted. Pick another with `ccswitch use <name>`. |
 | `refusing to delete 'x' without confirmation` | You're not in an interactive terminal. Add `--yes`. |
 | `cannot update …/settings.json` | That file isn't valid JSON. Fix or delete it, then retry. |

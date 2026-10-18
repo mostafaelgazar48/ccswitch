@@ -14,6 +14,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - `ccswitch add <name> --share` shares as the profile is created.
 - `CCSWITCH_SHARE_FROM` sets the folder to share from (default `~/.claude`).
 - On Windows, folders fall back to a junction when symlinks aren't allowed.
+- `ccswitch status` (`st`) shows each profile's account email, org and plan, MCP server count, bypass mode and last use. `--json` prints the same as JSON.
+- `ccswitch use <name> --here` writes a `.ccswitch` file, so the folder and its subfolders use that profile.
+- `ccswitch env [name]` prints shell commands that set `CLAUDE_CONFIG_DIR` and `CCSWITCH_PROFILE` for `eval`, for sh, fish and PowerShell. `--unset` clears them.
+- `CCSWITCH_PROFILE` picks the profile for a shell. Without a name, commands use it first, then the nearest `.ccswitch` file, then the default.
+
+### Changed
+- `ccswitch current` prints the profile in use in this folder or shell, and says on stderr where the choice came from.
 
 ## [0.2.0] - 2026-09-28
 

@@ -5,8 +5,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n\n\
-                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n\n\
+                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_PROFILE Profile to use in this shell, before .ccswitch files and the default\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -31,10 +31,33 @@ pub enum Command {
     /// List profiles (* marks the default)
     #[command(visible_alias = "ls")]
     List,
-    /// Set the default profile
-    Use { name: String },
-    /// Print the default profile
+    /// Set the default profile, or the profile for this folder with --here
+    Use {
+        name: String,
+        /// Write a .ccswitch file here instead, so this folder and its subfolders use the profile
+        #[arg(long)]
+        here: bool,
+    },
+    /// Print the profile in use here (stderr says why: default, .ccswitch or $CCSWITCH_PROFILE)
     Current,
+    /// Show every profile's account, plan, MCP servers and last use
+    #[command(visible_alias = "st")]
+    Status {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print shell commands that select a profile for this shell: eval "$(ccswitch env work)"
+    Env {
+        #[arg(conflicts_with = "unset")]
+        name: Option<String>,
+        /// Shell syntax to print [default: guessed from $SHELL]
+        #[arg(long, value_enum)]
+        shell: Option<Shell>,
+        /// Print commands that clear the selection instead
+        #[arg(long)]
+        unset: bool,
+    },
     /// Launch Claude with a profile (or the default); put Claude's own flags after --
     Run {
         name: Option<String>,
@@ -103,6 +126,16 @@ pub struct ShareArgs {
     /// Show what would change, without changing anything
     #[arg(long, conflicts_with = "status")]
     pub dry_run: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+pub enum Shell {
+    /// sh, bash, zsh and other POSIX shells
+    #[value(alias = "bash", alias = "zsh")]
+    Sh,
+    Fish,
+    #[value(alias = "pwsh")]
+    Powershell,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
