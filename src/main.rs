@@ -1,9 +1,17 @@
 mod app;
+mod archive;
+mod claude_json;
 mod cli;
+mod date;
 mod error;
 mod launch;
+mod pricing;
+mod sessions;
 mod settings;
+mod share;
+mod shell;
 mod store;
+mod usage;
 
 use clap::Parser;
 

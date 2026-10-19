@@ -1,12 +1,14 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n\n\
-                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n  ccswitch usage --since 30d --by model\n  ccswitch clone work client\n  ccswitch mcp copy work personal github\n\n\
+                  Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_PROFILE Profile to use in this shell, before .ccswitch files and the default\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -24,14 +26,40 @@ pub enum Command {
         /// Make it the default profile (automatic when there is no default yet)
         #[arg(long)]
         default: bool,
+        /// Share CLAUDE.md, skills, agents and more from ~/.claude (see `ccswitch share`)
+        #[arg(long)]
+        share: bool,
     },
     /// List profiles (* marks the default)
     #[command(visible_alias = "ls")]
     List,
-    /// Set the default profile
-    Use { name: String },
-    /// Print the default profile
+    /// Set the default profile, or the profile for this folder with --here
+    Use {
+        name: String,
+        /// Write a .ccswitch file here instead, so this folder and its subfolders use the profile
+        #[arg(long)]
+        here: bool,
+    },
+    /// Print the profile in use here (stderr says why: default, .ccswitch or $CCSWITCH_PROFILE)
     Current,
+    /// Show every profile's account, plan, MCP servers and last use
+    #[command(visible_alias = "st")]
+    Status {
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print shell commands that select a profile for this shell: eval "$(ccswitch env work)"
+    Env {
+        #[arg(conflicts_with = "unset")]
+        name: Option<String>,
+        /// Shell syntax to print [default: guessed from $SHELL]
+        #[arg(long, value_enum)]
+        shell: Option<Shell>,
+        /// Print commands that clear the selection instead
+        #[arg(long)]
+        unset: bool,
+    },
     /// Launch Claude with a profile (or the default); put Claude's own flags after --
     Run {
         name: Option<String>,
@@ -49,6 +77,64 @@ pub enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
+    /// List a profile's saved Claude conversations started in this folder, newest first
+    Sessions {
+        name: Option<String>,
+        /// Include every folder, not just this one
+        #[arg(long)]
+        all: bool,
+        /// How many to show
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Continue a conversation on another profile, such as when one account hits its usage limit
+    Handoff(HandoffArgs),
+    /// Show tokens used and their estimated API cost, across every profile or one
+    Usage {
+        /// Only this profile [default: every profile]
+        name: Option<String>,
+        /// First day to include: 7d (the last 7 days), 30d, YYYY-MM-DD or all. Days are UTC
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Group rows by
+        #[arg(long, value_enum, default_value_t = GroupBy::Day)]
+        by: GroupBy,
+        /// Print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy a profile's settings, CLAUDE.md, skills, MCP servers and more into a new profile,
+    /// without its login or history
+    Clone {
+        from: String,
+        new: String,
+        /// Create the profile without starting Claude to log in
+        #[arg(long)]
+        no_login: bool,
+    },
+    /// Save a profile's config (no login, no history) to a .tar.gz, for another machine
+    Export {
+        name: String,
+        /// File to write [default: ./<name>.ccswitch.tar.gz]
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+    /// Create a profile from a file made by `ccswitch export`
+    Import {
+        file: PathBuf,
+        /// Name for the new profile [default: the exported profile's name]
+        #[arg(long = "as", value_name = "NAME")]
+        name: Option<String>,
+        /// Link items the exported profile shared from ~/.claude (see `ccswitch share`)
+        #[arg(long)]
+        share: bool,
+        /// Create the profile without starting Claude to log in
+        #[arg(long)]
+        no_login: bool,
+    },
+    /// List MCP servers, or copy them between profiles
+    #[command(subcommand)]
+    Mcp(McpCommand),
     /// Rename a profile (Claude may ask you to log in again)
     #[command(visible_alias = "mv")]
     Rename { old: String, new: String },
@@ -66,8 +152,106 @@ pub enum Command {
         /// Omit to show the current state
         state: Option<Toggle>,
     },
+    /// Share CLAUDE.md, skills, agents and more from ~/.claude into a profile
+    Share(ShareArgs),
     /// Print a profile's config directory (or the default's)
     Path { name: Option<String> },
+}
+
+#[derive(Subcommand)]
+pub enum McpCommand {
+    /// List a profile's MCP servers (user scope)
+    #[command(visible_alias = "ls")]
+    List {
+        #[arg(conflicts_with = "all")]
+        name: Option<String>,
+        /// List every profile's servers
+        #[arg(long)]
+        all: bool,
+    },
+    /// Copy MCP servers from one profile to another
+    Copy {
+        from: String,
+        to: String,
+        /// Servers to copy [default: all of them]
+        servers: Vec<String>,
+        /// Replace servers the other profile already has with the same name
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Args)]
+pub struct HandoffArgs {
+    /// Profile to continue on
+    pub to: String,
+    /// Profile the conversation is in [default: the one in use here]
+    #[arg(long, value_name = "NAME")]
+    pub from: Option<String>,
+    /// Session id or its first characters (see `ccswitch sessions`) [default: the latest one
+    /// started in this folder]
+    #[arg(long, value_name = "ID")]
+    pub session: Option<String>,
+    /// Remove the conversation from the old profile after copying it
+    #[arg(long = "move")]
+    pub move_session: bool,
+    /// Replace a copy the new profile already has
+    #[arg(long)]
+    pub force: bool,
+    /// Copy only; don't start Claude
+    #[arg(long)]
+    pub no_resume: bool,
+    /// More arguments for Claude, after --resume <id>
+    #[arg(last = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct ShareArgs {
+    /// Profile to share into
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub name: Option<String>,
+    /// Apply to every profile
+    #[arg(long)]
+    pub all: bool,
+    /// Folder to share from [default: $CCSWITCH_SHARE_FROM, else ~/.claude]
+    #[arg(long, value_name = "DIR")]
+    pub from: Option<PathBuf>,
+    /// Items to share, comma separated. Default: CLAUDE.md, skills, agents, commands, plugins,
+    /// hooks, output-styles, keybindings.json. Add settings.json to copy its hooks, enabledPlugins,
+    /// env, statusLine, outputStyle and extraKnownMarketplaces keys (permissions stay per profile).
+    #[arg(long, value_delimiter = ',', value_name = "ITEMS")]
+    pub only: Vec<String>,
+    /// Replace a profile's own copy, keeping it as <name>.bak
+    #[arg(long, conflicts_with_all = ["undo", "status"])]
+    pub force: bool,
+    /// Remove the links instead of creating them
+    #[arg(long, conflicts_with = "status")]
+    pub undo: bool,
+    /// Show what is shared, without changing anything
+    #[arg(long)]
+    pub status: bool,
+    /// Show what would change, without changing anything
+    #[arg(long, conflicts_with = "status")]
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
+pub enum Shell {
+    /// sh, bash, zsh and other POSIX shells
+    #[value(alias = "bash", alias = "zsh")]
+    Sh,
+    Fish,
+    #[value(alias = "pwsh")]
+    Powershell,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum GroupBy {
+    Day,
+    Model,
+    Profile,
+    Session,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

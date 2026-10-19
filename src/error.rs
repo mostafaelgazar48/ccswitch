@@ -8,11 +8,43 @@ pub enum Error {
     AlreadyExists(String),
     NoDefault,
     DefaultMissing(String),
-    ProgramNotFound { program: String, hint: &'static str },
+    /// A profile named by `$CCSWITCH_PROFILE` or a `.ccswitch` file that doesn't exist.
+    PinnedMissing {
+        name: String,
+        from: String,
+    },
+    ProgramNotFound {
+        program: String,
+        hint: &'static str,
+    },
     NeedsConfirmation(String),
     Aborted,
-    Settings { path: String, message: String },
-    Io { context: String, source: io::Error },
+    UnknownItem(String),
+    /// No session matched; the message says what was looked for.
+    NoSession(String),
+    SessionExists {
+        id: String,
+        profile: String,
+    },
+    SameProfile(String),
+    BadSince(String),
+    Archive {
+        file: String,
+        message: String,
+    },
+    McpMissing {
+        server: String,
+        profile: String,
+    },
+    SourceMissing(String),
+    Settings {
+        path: String,
+        message: String,
+    },
+    Io {
+        context: String,
+        source: io::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,11 +73,32 @@ impl fmt::Display for Error {
                 f,
                 "default profile '{n}' no longer exists; pick another with `ccswitch use <name>`"
             ),
+            Error::PinnedMissing { name, from } => write!(
+                f,
+                "profile '{name}' (from {from}) not found; create it with `ccswitch add {name}` or change {from}"
+            ),
             Error::ProgramNotFound { program, hint } => {
                 write!(f, "could not run '{program}': not found ({hint})")
             }
             Error::NeedsConfirmation(n) => write!(f, "refusing to delete '{n}' without confirmation; pass --yes"),
             Error::Aborted => write!(f, "aborted"),
+            Error::NoSession(m) => write!(f, "{m}; list them with `ccswitch sessions <profile> --all`"),
+            Error::SessionExists { id, profile } => write!(
+                f,
+                "profile '{profile}' already has session {id}; pass --force to replace it"
+            ),
+            Error::SameProfile(n) => write!(f, "the session is already in '{n}'; name another profile"),
+            Error::BadSince(s) => write!(f, "invalid --since '{s}': use 7d, 30d, YYYY-MM-DD or all"),
+            Error::Archive { file, message } => write!(f, "cannot import {file}: {message}"),
+            Error::McpMissing { server, profile } => write!(
+                f,
+                "profile '{profile}' has no MCP server '{server}'; see `ccswitch mcp list {profile}`"
+            ),
+            Error::UnknownItem(i) => write!(
+                f,
+                "cannot share '{i}': give a plain file or folder name such as skills or CLAUDE.md (logins and history are never shared)"
+            ),
+            Error::SourceMissing(p) => write!(f, "folder to share from not found: {p}; pass --from <dir>"),
             Error::Settings { path, message } => write!(f, "cannot update {path}: {message}"),
             Error::Io { context, source } => write!(f, "{context}: {source}"),
         }
