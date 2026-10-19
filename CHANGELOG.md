@@ -6,6 +6,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
 ### Added
 - `ccswitch share <name>` links CLAUDE.md, skills, agents, commands, plugins, hooks, output-styles and keybindings.json from `~/.claude` into a profile. Logins, history and projects stay separate.
 - `share --all` applies to every profile, `--status` shows what is shared, `--dry-run` previews, `--undo` removes the links, and `--force` moves a profile's own copy to `<name>.bak` before linking.
@@ -54,7 +56,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 ### Security
 - Profile directories are created with `0700` permissions on Unix, because they hold login credentials.
 
-[Unreleased]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/mostafaelgazar48/ccswitch/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mostafaelgazar48/ccswitch/releases/tag/v0.1.0
