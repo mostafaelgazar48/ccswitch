@@ -28,6 +28,8 @@ $ ccswitch run work
 - [Profile per folder or shell](#profile-per-folder-or-shell)
 - [Hand off a conversation](#hand-off-a-conversation)
 - [Usage and cost](#usage-and-cost)
+- [Copy, back up and move profiles](#copy-back-up-and-move-profiles)
+- [MCP servers](#mcp-servers)
 - [Bypass permissions](#bypass-permissions)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -43,6 +45,7 @@ $ ccswitch run work
 - **Profile per folder or shell.** A `.ccswitch` file makes a project always use its own account.
 - **Hand off a conversation.** Hit the usage limit on one account? Continue the same conversation on another with `ccswitch handoff`.
 - **Usage across accounts.** `ccswitch usage` adds up tokens and estimated cost for every profile, by day, model, profile or conversation.
+- **Copy and move profiles.** `clone`, `export` and `import` carry settings, skills and MCP servers to a new profile or machine, never the login.
 - **Every account at a glance.** `ccswitch status` shows each profile's login, plan and MCP servers.
 - **Passes Claude's own flags through.** `ccswitch run work -- --resume`.
 - **Bypass permissions per profile.** Turn prompt-free mode on for one profile and leave the others alone.
@@ -164,6 +167,9 @@ not touched.
 | `ccswitch sessions [name] [--all]` | List saved conversations started in this folder (`--all`: every folder), newest first. |
 | `ccswitch handoff <to> [options]` | Copy a conversation to another profile and resume it there. See [Hand off a conversation](#hand-off-a-conversation). |
 | `ccswitch usage [name] [--since 7d] [--by day\|model\|profile\|session]` | Tokens and estimated cost for every profile (or one). See [Usage and cost](#usage-and-cost). |
+| `ccswitch clone <from> <new>` | New profile with another's settings, CLAUDE.md, skills and MCP servers, but not its login or history. |
+| `ccswitch export <name> [-o file]` / `ccswitch import <file> [--as name]` | Save a profile's config to a `.tar.gz` and create a profile from it, for example on another machine. |
+| `ccswitch mcp list [name\|--all]` / `ccswitch mcp copy <from> <to> [servers…]` | List MCP servers, or copy them between profiles. See [MCP servers](#mcp-servers). |
 | `ccswitch env [name]` | Print commands that select a profile for this shell: `eval "$(ccswitch env work)"`. |
 | `ccswitch run [name] [-- args…]` | Start Claude with a profile (default if omitted). Arguments after `--` go to Claude. |
 | `ccswitch run [name] --bypass` | Start one session in bypass-permissions mode. |
@@ -268,6 +274,44 @@ The cost is an **estimate at Claude API list prices**, including cache writes an
 Team plans are not billed per token, so for them it shows what the same work would cost on the API.
 Models missing from the price table are counted but not priced, and the footer says how many. A
 conversation copied by `handoff` is counted once.
+
+## Copy, back up and move profiles
+
+```sh
+ccswitch clone work client              # new profile set up like "work"; log in with another account
+ccswitch export work                    # writes ./work.ccswitch.tar.gz
+ccswitch import work.ccswitch.tar.gz    # on the new machine; --as <name> to rename
+ccswitch import work.ccswitch.tar.gz --share   # also link what it shared from ~/.claude
+```
+
+These copy `settings.json`, `CLAUDE.md`, `skills`, `agents`, `commands`, `hooks`, `output-styles`,
+`keybindings.json` and the profile's MCP servers. **The login is never copied**, nor are history,
+conversations, caches or other state Claude keeps there, so you log in to the new profile yourself
+(`clone` and `import` start Claude for that; `--no-login` skips it).
+
+The `plugins` folder isn't copied either. It holds downloaded copies with paths for this machine, and
+Claude installs plugins again from the `enabledPlugins` and `extraKnownMarketplaces` in
+`settings.json`. Items shared with `ccswitch share` stay links when cloned. In an export they're only
+listed by name, and `import --share` links them again.
+
+The export file is readable only by you, and `export` never overwrites a file. MCP server settings
+can contain API keys, so keep the file private.
+
+## MCP servers
+
+MCP servers added with `claude mcp add` (user scope) belong to one profile. To see and copy them:
+
+```sh
+ccswitch mcp list                       # the profile in use here
+ccswitch mcp list --all                 # every profile
+ccswitch mcp copy work personal         # copy all of work's servers to personal
+ccswitch mcp copy work personal github  # just these servers
+ccswitch mcp copy work personal github --force   # replace personal's own "github"
+```
+
+A server the other profile already has under the same name is kept unless you pass `--force`. Quit
+Claude in the target profile first; it can overwrite `.claude.json` when it exits. Project servers
+(`.mcp.json` in a repo) already work with every profile.
 
 ## VS Code
 
@@ -384,6 +428,7 @@ all behave exactly as if you had run `claude` directly.
 | `profile 'x' (from …/.ccswitch) not found` | Create the profile, or edit or delete that `.ccswitch` file. With `$CCSWITCH_PROFILE`, run `eval "$(ccswitch env --unset)"`. |
 | `default profile 'x' no longer exists` | The folder was deleted. Pick another with `ccswitch use <name>`. |
 | `refusing to delete 'x' without confirmation` | You're not in an interactive terminal. Add `--yes`. |
+| `cannot import …: not a ccswitch export` | The file wasn't made by `ccswitch export`, or is damaged. |
 | `cannot update …/settings.json` | That file isn't valid JSON. Fix or delete it, then retry. |
 | Asked to log in again after `rename` | Expected on some systems. Log in once more. |
 

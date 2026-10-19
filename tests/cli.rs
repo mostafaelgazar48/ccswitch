@@ -823,3 +823,199 @@ fn usage_sums_across_profiles_once_per_request() {
     assert!(stderr(&sb.run(&["usage", "--since", "soon"])).contains("invalid --since 'soon'"));
     assert!(stderr(&sb.run(&["usage", "--since", "2027-01-01"])).contains("No usage since"));
 }
+
+/// A profile with config worth copying, plus a login, history, caches and a shared link.
+fn rich_profile(sb: &Sandbox, name: &str) -> PathBuf {
+    sb.run(&["add", name, "--no-login"]);
+    let p = PathBuf::from(sb.profile(name));
+    fs::create_dir_all(p.join("skills/review")).unwrap();
+    fs::write(p.join("skills/review/SKILL.md"), "review").unwrap();
+    fs::write(p.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+    fs::write(p.join("CLAUDE.md"), "be brief").unwrap();
+    fs::write(p.join(".credentials.json"), "secret").unwrap();
+    fs::write(p.join("history.jsonl"), "{}").unwrap();
+    fs::create_dir_all(p.join("projects/-x")).unwrap();
+    fs::create_dir_all(p.join("paste-cache")).unwrap();
+    fs::create_dir_all(p.join("plugins/cache")).unwrap();
+    fs::write(
+        p.join(".claude.json"),
+        r#"{"oauthAccount":{"emailAddress":"me@x.com"},"numStartups":3,
+            "mcpServers":{"github":{"type":"http","url":"https://gh.example/mcp"},"db":{"command":"db-mcp"}}}"#,
+    )
+    .unwrap();
+    let shared = sb.dir.join("shared");
+    fs::create_dir_all(shared.join("agents")).unwrap();
+    std::os::unix::fs::symlink(shared.join("agents"), p.join("agents")).unwrap();
+    p
+}
+
+fn assert_only_config(p: &std::path::Path) {
+    assert_eq!(
+        fs::read_to_string(p.join("skills/review/SKILL.md")).unwrap(),
+        "review"
+    );
+    assert_eq!(fs::read_to_string(p.join("CLAUDE.md")).unwrap(), "be brief");
+    assert!(p.join("settings.json").is_file());
+    for private in [
+        ".credentials.json",
+        "history.jsonl",
+        "projects",
+        "paste-cache",
+        "plugins",
+    ] {
+        assert!(!p.join(private).exists(), "{private} must not be copied");
+    }
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(p.join(".claude.json")).unwrap()).unwrap();
+    assert_eq!(
+        json.as_object().unwrap().len(),
+        1,
+        "only mcpServers: {json}"
+    );
+    assert_eq!(json["mcpServers"]["db"]["command"], "db-mcp");
+}
+
+#[test]
+fn clone_copies_config_but_not_login_or_history() {
+    let sb = Sandbox::new("clone");
+    rich_profile(&sb, "work");
+    let out = sb.run(&["clone", "work", "client"]);
+    assert_eq!(out.status.code(), Some(7), "starts Claude to log in");
+    assert_eq!(sb.called(), [sb.profile("client")]);
+    let p = PathBuf::from(sb.profile("client"));
+    assert_only_config(&p);
+    assert!(is_link(&p.join("agents")), "shared items stay links");
+    assert!(stderr(&sb.run(&["clone", "work", "client"])).contains("already exists"));
+    assert!(stderr(&sb.run(&["clone", "ghost", "x"])).contains("not found"));
+}
+
+#[test]
+fn export_and_import_round_trip() {
+    let sb = Sandbox::new("export");
+    rich_profile(&sb, "work");
+    let file = sb.dir.join("work.tgz");
+    let f = file.display().to_string();
+    let out = sb.run(&["export", "work", "-o", &f]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("Shared items are not included, only named: agents"));
+    assert_eq!(
+        fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert!(
+        !sb.run(&["export", "work", "-o", &f]).status.success(),
+        "never overwrites"
+    );
+
+    let out = sb.run(&["import", &f, "--as", "laptop", "--no-login"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("ccswitch share laptop --only agents"));
+    let p = PathBuf::from(sb.profile("laptop"));
+    assert_only_config(&p);
+    assert!(!p.join("agents").exists());
+
+    let shared = sb.dir.join("shared");
+    let out = sb
+        .cmd(&["import", &f, "--share"])
+        .env("CCSWITCH_SHARE_FROM", &shared)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "'work' exists already");
+    let out = sb
+        .cmd(&["import", &f, "--as", "desk", "--share"])
+        .env("CCSWITCH_SHARE_FROM", &shared)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(7), "{}", stderr(&out));
+    assert!(is_link(&PathBuf::from(sb.profile("desk")).join("agents")));
+}
+
+#[test]
+fn import_rejects_bad_archives() {
+    let sb = Sandbox::new("import-bad");
+    let junk = sb.dir.join("junk.tgz");
+    fs::write(&junk, "not an archive").unwrap();
+    let out = sb.run(&["import", &junk.display().to_string(), "--no-login"]);
+    assert!(
+        stderr(&out).contains("not a ccswitch export"),
+        "{}",
+        stderr(&out)
+    );
+
+    // A real export with a login slipped in must be refused, and leave no profile behind.
+    let evil = sb.dir.join("evil.tgz");
+    let file = fs::File::create(&evil).unwrap();
+    let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
+        file,
+        flate2::Compression::default(),
+    ));
+    let manifest = br#"{"format":1,"name":"evil","shared":[],"mcpServers":{}}"#;
+    let mut header = tar::Header::new_gnu();
+    header.set_size(manifest.len() as u64);
+    header.set_mode(0o600);
+    header.set_cksum();
+    tar.append_data(&mut header, "ccswitch-export.json", &manifest[..])
+        .unwrap();
+    let mut header = tar::Header::new_gnu();
+    header.set_size(1);
+    header.set_mode(0o600);
+    header.set_cksum();
+    tar.append_data(&mut header, "profile/.credentials.json", &b"x"[..])
+        .unwrap();
+    tar.into_inner().unwrap().finish().unwrap();
+    let out = sb.run(&["import", &evil.display().to_string(), "--no-login"]);
+    assert!(
+        stderr(&out).contains(".credentials.json, which is never imported"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!PathBuf::from(sb.profile("evil")).exists());
+}
+
+#[test]
+fn mcp_list_and_copy() {
+    let sb = Sandbox::new("mcp");
+    rich_profile(&sb, "work");
+    sb.run(&["add", "home", "--no-login"]);
+    let home = PathBuf::from(sb.profile("home"));
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"numStartups":9,"mcpServers":{"db":{"command":"other"}}}"#,
+    )
+    .unwrap();
+
+    let list = stdout(&sb.run(&["mcp", "list", "work"]));
+    assert!(
+        list.contains("github  http  https://gh.example/mcp"),
+        "{list}"
+    );
+    assert!(list.contains("db      stdio  db-mcp"), "{list}");
+    let all = stdout(&sb.run(&["mcp", "ls", "--all"]));
+    assert!(
+        all.contains("home:\n  db") && all.contains("work:\n"),
+        "{all}"
+    );
+
+    let out = stdout(&sb.run(&["mcp", "copy", "work", "home"]));
+    assert!(
+        out.contains("github: copied") && out.contains("db: kept"),
+        "{out}"
+    );
+    let json = || -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap()
+    };
+    assert_eq!(json()["mcpServers"]["db"]["command"], "other");
+    assert_eq!(json()["numStartups"], 9, "other keys are kept");
+
+    let out = stdout(&sb.run(&["mcp", "copy", "work", "home", "db", "--force"]));
+    assert_eq!(out, "db: replaced\n");
+    assert_eq!(json()["mcpServers"]["db"]["command"], "db-mcp");
+    assert_eq!(
+        stdout(&sb.run(&["mcp", "copy", "work", "home", "db"])),
+        "db: already there\n"
+    );
+    assert!(
+        stderr(&sb.run(&["mcp", "copy", "work", "home", "nope"])).contains("no MCP server 'nope'")
+    );
+    assert!(!sb.run(&["mcp", "copy", "work", "work"]).status.success());
+}

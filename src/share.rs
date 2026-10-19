@@ -35,7 +35,27 @@ const SHARED_SETTINGS_KEYS: &[&str] = &[
     "outputStyle",
 ];
 
-/// Logins and per-profile state. Sharing these would defeat isolation.
+/// What `clone` and `export` copy, besides MCP servers. Everything else in a profile is login,
+/// history, caches or runtime state. `plugins` holds installed copies and caches with
+/// machine-specific paths; Claude reinstalls plugins from `settings.json`.
+const PORTABLE: &[&str] = &[
+    "CLAUDE.md",
+    "skills",
+    "agents",
+    "commands",
+    "hooks",
+    "output-styles",
+    "keybindings.json",
+    SETTINGS,
+];
+
+/// Whether `clone` and `export` copy this top-level profile item. A shared item (a link) is
+/// always kept, since it costs nothing.
+pub fn is_portable(name: &str, is_link: bool) -> bool {
+    PORTABLE.contains(&name) || (is_link && DEFAULT_ITEMS.contains(&name))
+}
+
+/// Logins, history and per-profile state and caches. Sharing these would defeat isolation.
 const PRIVATE: &[&str] = &[
     ".credentials.json",
     ".claude.json",
@@ -47,6 +67,12 @@ const PRIVATE: &[&str] = &[
     "statsig",
     "ide",
     "vscode-data",
+    "file-history",
+    "session-env",
+    "backups",
+    "cache",
+    "paste-cache",
+    "daemon",
 ];
 
 #[derive(Clone, Copy)]

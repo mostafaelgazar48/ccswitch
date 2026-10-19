@@ -1,4 +1,5 @@
 mod app;
+mod archive;
 mod claude_json;
 mod cli;
 mod date;

@@ -2,19 +2,19 @@ use std::{
     collections::HashSet,
     env, fs,
     io::{self, BufRead, IsTerminal, Write},
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
 use serde_json::json;
 
 use crate::{
-    claude_json,
-    cli::{Command, GroupBy, HandoffArgs, ShareArgs, Toggle},
+    archive, claude_json,
+    cli::{Command, GroupBy, HandoffArgs, McpCommand, ShareArgs, Toggle},
     date,
     error::{Context, Error, Result},
     launch, sessions, share, shell,
-    store::{Source, Store},
+    store::{self, Source, Store},
     usage::{self, Totals},
 };
 
@@ -91,6 +91,25 @@ pub fn run(command: Command) -> Result<i32> {
             by,
             json,
         } => show_usage(&store, name, &since, by, json),
+        Command::Clone {
+            from,
+            new,
+            no_login,
+        } => clone(&store, &from, &new, no_login),
+        Command::Export { name, output } => export(&store, &name, output),
+        Command::Import {
+            file,
+            name,
+            share,
+            no_login,
+        } => import(&store, &file, name, share, no_login),
+        Command::Mcp(McpCommand::List { name, all }) => mcp_list(&store, name.as_deref(), all),
+        Command::Mcp(McpCommand::Copy {
+            from,
+            to,
+            servers,
+            force,
+        }) => mcp_copy(&store, &from, &to, &servers, force),
         Command::Bypass { name, state } => bypass(&store, &name, state),
         Command::Rename { old, new } => {
             store.rename(&old, &new)?;
@@ -256,7 +275,7 @@ fn print_table<R: AsRef<[String]>>(header: &[String], rows: &[R], right_from: us
     }
 }
 
-fn current_dir() -> Result<std::path::PathBuf> {
+fn current_dir() -> Result<PathBuf> {
     env::current_dir().with_context(|| "finding the current folder".to_owned())
 }
 
@@ -477,6 +496,195 @@ fn show_usage(
             "{} request(s) from models without a known price are not in the cost.",
             total.unpriced
         );
+    }
+    Ok(0)
+}
+
+fn clone(store: &Store, from: &str, new: &str, no_login: bool) -> Result<i32> {
+    let source = store.existing(from)?;
+    let servers = claude_json::mcp_servers(&claude_json::read(&source)?);
+    let dest = store.create(new)?;
+    let skip = |rel: &Path| {
+        let mut parts = rel.components();
+        match (parts.next(), parts.next()) {
+            (Some(name), None) => {
+                let is_link = fs::symlink_metadata(source.join(rel))
+                    .is_ok_and(|m| m.file_type().is_symlink());
+                !share::is_portable(&name.as_os_str().to_string_lossy(), is_link)
+            }
+            _ => false,
+        }
+    };
+    let result = store::copy_tree(&source, &dest, &skip).and_then(|()| {
+        if servers.is_empty() {
+            return Ok(());
+        }
+        let mut json = serde_json::Map::new();
+        claude_json::set_mcp_servers(&mut json, servers.clone());
+        claude_json::write(&dest, &json)
+    });
+    if let Err(e) = result {
+        let _ = fs::remove_dir_all(&dest);
+        return Err(e);
+    }
+    println!(
+        "Created profile '{new}' from '{from}' with its settings and {} MCP server(s); the login and history were not copied.",
+        servers.len()
+    );
+    if no_login {
+        return Ok(0);
+    }
+    println!("Starting Claude Code; log in when prompted.");
+    launch::claude(&dest, &[])
+}
+
+fn export(store: &Store, name: &str, output: Option<PathBuf>) -> Result<i32> {
+    let profile = store.existing(name)?;
+    let out = output.unwrap_or_else(|| PathBuf::from(format!("{name}.ccswitch.tar.gz")));
+    let (manifest, summary) = archive::export(&profile, name, &out)?;
+    println!(
+        "Exported '{name}' to {} ({} file(s), {} MCP server(s)). Logins and history are not included.",
+        out.display(),
+        summary.files,
+        manifest.mcp_servers.len()
+    );
+    if !manifest.shared.is_empty() {
+        println!(
+            "Shared items are not included, only named: {}. `ccswitch import --share` links them again.",
+            manifest.shared.join(", ")
+        );
+    }
+    if summary.skipped_links > 0 {
+        eprintln!(
+            "warning: left out {} link(s) inside folders",
+            summary.skipped_links
+        );
+    }
+    if !manifest.mcp_servers.is_empty() {
+        eprintln!("note: MCP server settings can hold API keys; keep this file private.");
+    }
+    Ok(0)
+}
+
+fn import(
+    store: &Store,
+    file: &Path,
+    name: Option<String>,
+    share_items: bool,
+    no_login: bool,
+) -> Result<i32> {
+    let mut chosen = name;
+    let (manifest, profile, summary) = archive::import(file, |manifest| {
+        let name = chosen.get_or_insert_with(|| manifest.name.clone());
+        store.create(name)
+    })?;
+    let name = chosen.expect("set when the profile was created");
+    println!(
+        "Created profile '{name}' from {} ({} file(s), {} MCP server(s))",
+        file.display(),
+        summary.files,
+        manifest.mcp_servers.len()
+    );
+    if !manifest.shared.is_empty() {
+        if share_items {
+            let linked = share::check_items(&manifest.shared).and_then(|items| {
+                let opts = share::Opts {
+                    force: false,
+                    dry_run: false,
+                };
+                share::link(&share::default_source()?, &profile, &items, opts)
+            });
+            match linked {
+                Ok(results) => {
+                    for (item, outcome) in results {
+                        println!("  {item}: {}", outcome.describe(false));
+                    }
+                }
+                Err(e) => eprintln!("warning: could not share config: {e}"),
+            }
+        } else {
+            println!(
+                "It shared {} from ~/.claude; link them with `ccswitch share {name} --only {}`.",
+                manifest.shared.join(", "),
+                manifest.shared.join(",")
+            );
+        }
+    }
+    if no_login {
+        return Ok(0);
+    }
+    println!("Starting Claude Code; log in when prompted.");
+    launch::claude(&profile, &[])
+}
+
+fn mcp_list(store: &Store, name: Option<&str>, all: bool) -> Result<i32> {
+    let names = if all {
+        store.list()?
+    } else {
+        vec![store.resolve(name)?.0]
+    };
+    for name in &names {
+        let servers = claude_json::mcp_servers(&claude_json::read(&store.existing(name)?)?);
+        let indent = if all {
+            println!("{name}:");
+            "  "
+        } else {
+            ""
+        };
+        if servers.is_empty() {
+            println!("{indent}(no MCP servers)");
+            continue;
+        }
+        let width = servers.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+        for (server, config) in &servers {
+            println!(
+                "{indent}{server:width$}  {}",
+                claude_json::describe_server(config)
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn mcp_copy(store: &Store, from: &str, to: &str, servers: &[String], force: bool) -> Result<i32> {
+    let source = claude_json::mcp_servers(&claude_json::read(&store.existing(from)?)?);
+    let dest_path = store.existing(to)?;
+    if from == to {
+        return Err(Error::SameProfile(to.to_owned()));
+    }
+    let mut dest = claude_json::read(&dest_path)?;
+    let mut target = claude_json::mcp_servers(&dest);
+    let names: Vec<String> = if servers.is_empty() {
+        source.keys().cloned().collect()
+    } else {
+        servers.to_vec()
+    };
+    if names.is_empty() {
+        println!("'{from}' has no MCP servers to copy.");
+        return Ok(0);
+    }
+    let mut changed = false;
+    for server in &names {
+        let config = source.get(server).ok_or_else(|| Error::McpMissing {
+            server: server.clone(),
+            profile: from.to_owned(),
+        })?;
+        let outcome = match target.get(server) {
+            Some(existing) if existing == config => "already there",
+            Some(_) if !force => "kept (it has its own; use --force to replace it)",
+            Some(_) => "replaced",
+            None => "copied",
+        };
+        if matches!(outcome, "copied" | "replaced") {
+            target.insert(server.clone(), config.clone());
+            changed = true;
+        }
+        println!("{server}: {outcome}");
+    }
+    if changed {
+        claude_json::set_mcp_servers(&mut dest, target);
+        claude_json::write(&dest_path, &dest)?;
+        eprintln!("Restart Claude in '{to}' if it's running, or it may overwrite this change.");
     }
     Ok(0)
 }

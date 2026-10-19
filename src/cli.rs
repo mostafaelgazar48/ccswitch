@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -5,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "ccswitch",
     version,
     about = "Switch between isolated Claude Code profiles",
-    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n  ccswitch usage --since 30d --by model\n\n\
+    after_help = "Examples:\n  ccswitch add work\n  ccswitch use work\n  ccswitch use client --here\n  eval \"$(ccswitch env work)\"\n  ccswitch status\n  ccswitch run -- --resume\n  ccswitch run personal -- -p \"hello\"\n  ccswitch code work -- ~/projects/app\n  ccswitch bypass personal on\n  ccswitch share work\n  ccswitch handoff personal\n  ccswitch usage --since 30d --by model\n  ccswitch clone work client\n  ccswitch mcp copy work personal github\n\n\
                   Environment:\n  CCSWITCH_HOME    Where profiles are stored (default: ~/.ccswitch)\n  CCSWITCH_PROFILE Profile to use in this shell, before .ccswitch files and the default\n  CCSWITCH_CLAUDE  Claude Code binary to run (default: claude)\n  CCSWITCH_CODE    VS Code binary to run (default: code)"
 )]
 pub struct Cli {
@@ -101,6 +103,38 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Copy a profile's settings, CLAUDE.md, skills, MCP servers and more into a new profile,
+    /// without its login or history
+    Clone {
+        from: String,
+        new: String,
+        /// Create the profile without starting Claude to log in
+        #[arg(long)]
+        no_login: bool,
+    },
+    /// Save a profile's config (no login, no history) to a .tar.gz, for another machine
+    Export {
+        name: String,
+        /// File to write [default: ./<name>.ccswitch.tar.gz]
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+    /// Create a profile from a file made by `ccswitch export`
+    Import {
+        file: PathBuf,
+        /// Name for the new profile [default: the exported profile's name]
+        #[arg(long = "as", value_name = "NAME")]
+        name: Option<String>,
+        /// Link items the exported profile shared from ~/.claude (see `ccswitch share`)
+        #[arg(long)]
+        share: bool,
+        /// Create the profile without starting Claude to log in
+        #[arg(long)]
+        no_login: bool,
+    },
+    /// List MCP servers, or copy them between profiles
+    #[command(subcommand)]
+    Mcp(McpCommand),
     /// Rename a profile (Claude may ask you to log in again)
     #[command(visible_alias = "mv")]
     Rename { old: String, new: String },
@@ -122,6 +156,29 @@ pub enum Command {
     Share(ShareArgs),
     /// Print a profile's config directory (or the default's)
     Path { name: Option<String> },
+}
+
+#[derive(Subcommand)]
+pub enum McpCommand {
+    /// List a profile's MCP servers (user scope)
+    #[command(visible_alias = "ls")]
+    List {
+        #[arg(conflicts_with = "all")]
+        name: Option<String>,
+        /// List every profile's servers
+        #[arg(long)]
+        all: bool,
+    },
+    /// Copy MCP servers from one profile to another
+    Copy {
+        from: String,
+        to: String,
+        /// Servers to copy [default: all of them]
+        servers: Vec<String>,
+        /// Replace servers the other profile already has with the same name
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Args)]
@@ -159,7 +216,7 @@ pub struct ShareArgs {
     pub all: bool,
     /// Folder to share from [default: $CCSWITCH_SHARE_FROM, else ~/.claude]
     #[arg(long, value_name = "DIR")]
-    pub from: Option<std::path::PathBuf>,
+    pub from: Option<PathBuf>,
     /// Items to share, comma separated. Default: CLAUDE.md, skills, agents, commands, plugins,
     /// hooks, output-styles, keybindings.json. Add settings.json to copy its hooks, enabledPlugins,
     /// env, statusLine, outputStyle and extraKnownMarketplaces keys (permissions stay per profile).

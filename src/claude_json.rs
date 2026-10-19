@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use crate::{
     error::{Error, Result},
     settings,
+    store::write_atomic,
 };
 
 pub const FILE: &str = ".claude.json";
@@ -51,6 +52,19 @@ pub fn read(profile: &Path) -> Result<Map<String, Value>> {
     })
 }
 
+/// Replaces the file, keeping it readable by the owner only, as Claude does.
+pub fn write(profile: &Path, json: &Map<String, Value>) -> Result<()> {
+    let file = profile.join(FILE);
+    write_atomic(&file, &settings::to_string(json))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600))
+            .map_err(|e| Error::io(format!("protecting {}", file.display()), e))?;
+    }
+    Ok(())
+}
+
 pub fn account(json: &Map<String, Value>) -> Option<Account> {
     let oauth = json.get("oauthAccount")?.as_object()?;
     let field = |key: &str| {
@@ -80,6 +94,36 @@ pub fn mcp_servers(json: &Map<String, Value>) -> Map<String, Value> {
         .unwrap_or_default()
 }
 
+pub fn set_mcp_servers(json: &mut Map<String, Value>, servers: Map<String, Value>) {
+    json.insert("mcpServers".to_owned(), Value::Object(servers));
+}
+
+/// One line about a server: its transport and what it runs or connects to.
+pub fn describe_server(config: &Value) -> String {
+    let field = |key: &str| config.get(key).and_then(Value::as_str);
+    let kind = field("type").unwrap_or(if field("url").is_some() {
+        "http"
+    } else {
+        "stdio"
+    });
+    let target = match field("url") {
+        Some(url) => url.to_owned(),
+        None => std::iter::once(field("command").unwrap_or("?").to_owned())
+            .chain(
+                config
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(String::from),
+            )
+            .collect::<Vec<_>>()
+            .join(" "),
+    };
+    format!("{kind}  {target}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +147,18 @@ mod tests {
             ..Account::default()
         };
         assert_eq!(personal.org_and_plan(), "personal (pro)");
+    }
+
+    #[test]
+    fn describes_servers() {
+        let stdio = serde_json::json!({"type":"stdio","command":"npx","args":["-y","pkg"],"env":{"K":"secret"}});
+        assert_eq!(describe_server(&stdio), "stdio  npx -y pkg");
+        let http = serde_json::json!({"type":"http","url":"https://x.dev/mcp"});
+        assert_eq!(describe_server(&http), "http  https://x.dev/mcp");
+        assert_eq!(
+            describe_server(&serde_json::json!({"command":"run"})),
+            "stdio  run"
+        );
     }
 
     #[test]

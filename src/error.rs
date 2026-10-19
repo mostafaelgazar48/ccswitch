@@ -28,6 +28,14 @@ pub enum Error {
     },
     SameProfile(String),
     BadSince(String),
+    Archive {
+        file: String,
+        message: String,
+    },
+    McpMissing {
+        server: String,
+        profile: String,
+    },
     SourceMissing(String),
     Settings {
         path: String,
@@ -81,6 +89,11 @@ impl fmt::Display for Error {
             ),
             Error::SameProfile(n) => write!(f, "the session is already in '{n}'; name another profile"),
             Error::BadSince(s) => write!(f, "invalid --since '{s}': use 7d, 30d, YYYY-MM-DD or all"),
+            Error::Archive { file, message } => write!(f, "cannot import {file}: {message}"),
+            Error::McpMissing { server, profile } => write!(
+                f,
+                "profile '{profile}' has no MCP server '{server}'; see `ccswitch mcp list {profile}`"
+            ),
             Error::UnknownItem(i) => write!(
                 f,
                 "cannot share '{i}': give a plain file or folder name such as skills or CLAUDE.md (logins and history are never shared)"

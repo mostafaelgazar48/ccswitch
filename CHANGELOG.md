@@ -21,6 +21,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
 - `ccswitch handoff <to>` copies the latest conversation in this folder (or `--session <id>`) to another profile, with its subagent output and rewind history, and resumes it there. `--from`, `--move`, `--force`, `--no-resume`, and Claude flags after `--`.
 - `ccswitch sessions [name]` lists saved conversations with their titles; `--all` covers every folder.
 - `ccswitch usage [name]` adds up tokens (input, output, cache write, cache read) and their estimated API cost from every profile's conversation logs. `--since 7d|30d|YYYY-MM-DD|all`, `--by day|model|profile|session`, `--json`. Repeated log lines and conversations copied by `handoff` are counted once.
+- `ccswitch clone <from> <new>` creates a profile with another's settings, CLAUDE.md, skills, agents, commands, hooks, output styles, keybindings and MCP servers. The login, history, caches and plugin downloads are not copied. Shared links stay links.
+- `ccswitch export <name>` saves the same config to a private `.tar.gz`, and `ccswitch import <file>` creates a profile from it (`--as`, `--share`, `--no-login`). Import refuses links, paths outside the profile and anything that isn't config.
+- `ccswitch mcp list [name|--all]` shows user-scope MCP servers; `ccswitch mcp copy <from> <to> [servers…]` copies them, keeping the target's own servers unless `--force`.
 
 ### Changed
 - `ccswitch current` prints the profile in use in this folder or shell, and says on stderr where the choice came from.
